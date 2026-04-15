@@ -1,0 +1,104 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Electronics Inventory</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main class="container">
+    <section class="hero">
+      <div>
+        <h1>Electronics Inventory</h1>
+        <p>Structured entries, QR labels, and printable inventory tags.</p>
+      </div>
+      <div class="hero-actions">
+        <a class="button-link" href="/labels" target="_blank">Print QR labels</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Add electronics item</h2>
+      <form action="/items" method="post" enctype="multipart/form-data" class="grid">
+        <label>Category
+          <select name="category">
+            {% for option in category_options %}
+              <option value="{{ option }}" {% if option == 'Electronics' %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Type
+          <select name="item_type" required>
+            {% for option in type_options %}
+              <option value="{{ option }}">{{ option }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Value / Model<input name="value_model" placeholder="10k, 100uF 25V, AD5933, Arduino Nano" /></label>
+        <label>Primary location
+          <select name="location" required>
+            {% for option in location_options %}
+              <option value="{{ option }}">{{ option }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Location detail<input name="location_detail" placeholder="Slot 4, bag 2, anti-static bin" /></label>
+        <label>Quantity<input name="quantity" type="number" value="1" min="1" required /></label>
+        <label>Tags<input name="tags" placeholder="spare, tested, 5V, through-hole" /></label>
+        <label class="full">Notes<textarea name="notes" rows="3" placeholder="Any detail that helps later"></textarea></label>
+        <label class="full">Photo<input name="photo" type="file" accept="image/*" capture="environment" /></label>
+        <button type="submit">Save item + generate QR</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="header-row">
+        <h2>Search inventory</h2>
+        <form action="/" method="get" class="search-form">
+          <input name="q" value="{{ q }}" placeholder="10k, Arduino, Drawer A2, sensor..." />
+          <button type="submit">Search</button>
+          <a class="button-link secondary" href="/labels{% if q %}?q={{ q }}{% endif %}" target="_blank">Printable labels</a>
+        </form>
+      </div>
+
+      <div class="items">
+        {% for item in items %}
+        <article class="item-card">
+          {% if item['image_path'] %}
+            <img src="{{ item['image_path'] }}" alt="{{ item['structured_name'] }}" />
+          {% else %}
+            <div class="placeholder">No photo</div>
+          {% endif %}
+          <div class="item-body">
+            <h3>{{ item['structured_name'] }}</h3>
+            <p><strong>Category:</strong> {{ item['category'] }}</p>
+            <p><strong>Type:</strong> {{ item['item_type'] }}</p>
+            <p><strong>Value/Model:</strong> {{ item['value_model'] or '-' }}</p>
+            <p><strong>Location:</strong> {{ item['location'] }}</p>
+            <p><strong>Quantity:</strong> {{ item['quantity'] }}</p>
+            <p><strong>Tags:</strong> {{ item['tags'] or '-' }}</p>
+            <p><strong>Notes:</strong> {{ item['notes'] or '-' }}</p>
+            {% if item['qr_path'] %}
+            <div class="qr-row">
+              <img class="qr-thumb" src="{{ item['qr_path'] }}" alt="QR code for {{ item['structured_name'] }}" />
+              <div class="qr-actions">
+                <a class="button-link small" href="{{ item['qr_path'] }}" download="{{ item['structured_name'] }}_QR.png">Download QR</a>
+                <a class="button-link small secondary" href="/items/{{ item['id'] }}" target="_blank">Open item</a>
+              </div>
+            </div>
+            {% endif %}
+            <form action="/items/{{ item['id'] }}/delete" method="post" onsubmit="return confirm('Delete this item?');">
+              <button class="danger" type="submit">Delete</button>
+            </form>
+          </div>
+        </article>
+        {% else %}
+        <p>No items yet.</p>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+</body>
+</html>
