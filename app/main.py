@@ -1,687 +1,376 @@
-from __future__ import annotations
-
-import hashlib
-import hmac
+import json
 import os
 import re
 import secrets
 import shutil
 import sqlite3
-import uuid
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
 import qrcode
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, Form, Request, UploadFile, File, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.datastructures import URL
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "inventory.db"
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", BASE_DIR / "uploads"))
-QRCODE_DIR = UPLOAD_DIR / "qrcodes"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-QRCODE_DIR.mkdir(parents=True, exist_ok=True)
-APP_BASE_URL = os.getenv("APP_BASE_URL", "").rstrip("/")
-SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret-key-immediately")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
-ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
-SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "inventory_session")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "change-me")
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-not-for-production")
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
+DB_PATH = Path(os.getenv("DB_PATH", str(UPLOAD_DIR / "inventory.db")))
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
 
-CATEGORY_OPTIONS = [
-    "Electronics", "Cable", "Tool", "Hardware", "Other"
-]
-TYPE_OPTIONS = [
-    "Resistor", "Capacitor", "Inductor", "Diode", "Transistor", "IC", "Sensor", "Module",
-    "Board", "Connector", "Cable", "Power Supply", "Battery", "Relay", "Switch", "Display",
-    "Motor", "Driver", "Adapter", "Tool", "Fastener", "Other"
-]
-LOCATION_OPTIONS = [
-    "Box 1", "Box 2", "Box 3", "Box 4", "Drawer A1", "Drawer A2", "Drawer A3",
-    "Drawer B1", "Drawer B2", "Shelf 1", "Shelf 2", "Shelf 3", "Bench", "Field Kit"
-]
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Electronics Inventory")
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=SECRET_KEY,
-    session_cookie=SESSION_COOKIE_NAME,
-    same_site="lax",
-    https_only=False,
-    max_age=60 * 60 * 24 * 14,
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, https_only=False, same_site="lax")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+env = Environment(
+    loader=FileSystemLoader(str(TEMPLATES_DIR)),
+    autoescape=select_autoescape(["html", "xml"]),
 )
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "app" / "static")), name="static")
-templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
 
+PUBLIC_PATHS = {"/login", "/health"}
 
-def get_conn() -> sqlite3.Connection:
+CATEGORY_OPTIONS = ["Electronics"]
+TYPE_OPTIONS = [
+    "Resistor", "Capacitor", "Inductor", "Diode", "Transistor", "IC",
+    "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply", "Tool", "Other"
+]
+
+def db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+def init_db():
+    conn = db()
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,
+        item_type TEXT NOT NULL,
+        value_model TEXT NOT NULL,
+        normalized_value TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        location TEXT NOT NULL,
+        tags TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        structured_name TEXT NOT NULL,
+        photo_filename TEXT DEFAULT '',
+        qr_filename TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    conn.commit()
+    conn.close()
 
-def column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
-    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    return any(row[1] == column for row in rows)
+init_db()
 
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
 
-def init_db() -> None:
-    with get_conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                structured_name TEXT NOT NULL,
-                category TEXT NOT NULL,
-                item_type TEXT NOT NULL,
-                value_model TEXT,
-                location TEXT NOT NULL,
-                quantity INTEGER NOT NULL DEFAULT 1,
-                tags TEXT,
-                notes TEXT,
-                image_path TEXT,
-                qr_path TEXT,
-                qr_payload TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        if not column_exists(conn, "items", "qr_path"):
-            conn.execute("ALTER TABLE items ADD COLUMN qr_path TEXT")
-        if not column_exists(conn, "items", "qr_payload"):
-            conn.execute("ALTER TABLE items ADD COLUMN qr_payload TEXT")
-        conn.commit()
+    # Public paths must remain public for Railway healthcheck and login.
+    if path in PUBLIC_PATHS or path.startswith("/static"):
+        return await call_next(request)
 
+    if request.session.get("authenticated") is True:
+        return await call_next(request)
 
-def slugify(value: str) -> str:
-    value = value.strip().upper()
-    value = re.sub(r"[^A-Z0-9]+", "_", value)
-    return re.sub(r"_+", "_", value).strip("_") or "NA"
+    next_path = quote(str(request.url.path))
+    return RedirectResponse(url=f"/login?next={next_path}", status_code=303)
 
+def render(request: Request, template_name: str, **context):
+    template = env.get_template(template_name)
+    base_context = {
+        "request": request,
+        "app_base_url": APP_BASE_URL,
+        "logged_in": request.session.get("authenticated", False),
+    }
+    base_context.update(context)
+    return HTMLResponse(template.render(**base_context))
 
-def normalize_text(value: str) -> str:
-    return re.sub(r"\s+", " ", (value or "").strip())
+def slugify(text: str) -> str:
+    text = text.strip().upper()
+    text = re.sub(r"[^A-Z0-9]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text or "NA"
 
-
-def canonical_category(category: str) -> str:
-    category = normalize_text(category)
-    for option in CATEGORY_OPTIONS:
-        if category.lower() == option.lower():
-            return option
-    return category.title() if category else "Other"
-
-
-def canonical_type(item_type: str) -> str:
-    item_type = normalize_text(item_type)
-    for option in TYPE_OPTIONS:
-        if item_type.lower() == option.lower():
-            return option
-    return item_type.title() if item_type else "Other"
-
-
-def normalize_location(location: str, location_detail: str = "") -> str:
-    base = normalize_text(location)
-    detail = normalize_text(location_detail)
-    return f"{base} / {detail}" if detail else base
-
-
-def normalize_value_model(value: str) -> str:
-    value = normalize_text(value)
-    if not value:
+def normalize_value(item_type: str, value: str) -> str:
+    s = value.strip().lower().replace(" ", "")
+    if not s:
         return ""
-    compact = value.replace("Ω", "ohm")
-    compact = re.sub(r"\s+", "", compact)
-    compact_low = compact.lower()
-
-    resistor = re.fullmatch(r"([0-9]*\.?[0-9]+)([kKmMrR]?)(ohm)?", compact_low)
-    if resistor:
-        num, suffix, _ = resistor.groups()
-        suffix_map = {"": "Ω", "r": "Ω", "k": "kΩ", "m": "MΩ"}
-        return f"{num}{suffix_map.get(suffix, '')}"
-
-    cap = re.fullmatch(r"([0-9]*\.?[0-9]+)(uf|nf|pf|mf)([0-9]*\.?[0-9]+v)?", compact_low)
-    if cap:
-        num, unit, volt = cap.groups()
-        unit_map = {"uf": "µF", "nf": "nF", "pf": "pF", "mf": "mF"}
-        out = f"{num}{unit_map[unit]}"
-        if volt:
-            out += f" {volt.upper()}"
-        return out
-
-    return value
-
+    # Basic electronics normalization for duplicate matching.
+    unit_map = {
+        "k": 1_000,
+        "m": 1_000_000,
+        "r": 1,
+    }
+    if item_type.lower() == "resistor":
+        m = re.fullmatch(r"(\d+(?:\.\d+)?)([kmr]?)(?:ohm|Ω)?", s)
+        if m:
+            num = float(m.group(1))
+            mult = unit_map.get(m.group(2), 1)
+            return f"{int(num*mult)}OHM"
+    if item_type.lower() == "capacitor":
+        m = re.fullmatch(r"(\d+(?:\.\d+)?)(pf|nf|uf|mf|f)(?:[-_]?(\d+(?:\.\d+)?v))?", s)
+        if m:
+            num = float(m.group(1))
+            unit = m.group(2).upper()
+            volt = (m.group(3) or "").upper()
+            return f"{num:g}{unit}{volt}"
+    return s.upper()
 
 def build_structured_name(category: str, item_type: str, value_model: str, location: str, quantity: int) -> str:
-    parts = [slugify(category), slugify(item_type), slugify(value_model or "GENERIC"), slugify(location), f"{quantity}PCS"]
-    return "_".join(parts)
+    return "_".join([
+        slugify(category),
+        slugify(item_type),
+        slugify(value_model),
+        slugify(location),
+        f"{quantity}PCS",
+    ])
 
+def save_upload(file: UploadFile) -> str:
+    suffix = Path(file.filename or "").suffix.lower() or ".jpg"
+    filename = f"{secrets.token_hex(8)}{suffix}"
+    target = UPLOAD_DIR / filename
+    with target.open("wb") as out:
+        shutil.copyfileobj(file.file, out)
+    return filename
 
-def save_upload(upload: Optional[UploadFile]) -> Optional[str]:
-    if not upload or not upload.filename:
-        return None
+def create_qr(item_id: int) -> str:
+    target_url = f"{APP_BASE_URL}/items/{item_id}"
+    img = qrcode.make(target_url)
+    filename = f"qr_{item_id}.png"
+    path = UPLOAD_DIR / filename
+    img.save(path)
+    return filename
 
-    suffix = Path(upload.filename).suffix.lower()
-    allowed = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-    if suffix not in allowed:
-        raise HTTPException(status_code=400, detail="Unsupported image type.")
+def get_item(item_id: int):
+    conn = db()
+    item = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    conn.close()
+    return item
 
-    filename = f"{uuid.uuid4().hex}{suffix}"
-    destination = UPLOAD_DIR / filename
-    with destination.open("wb") as buffer:
-        shutil.copyfileobj(upload.file, buffer)
-    return f"/uploads/{filename}"
-
-
-def build_qr_payload(item_id: int, structured_name: str, category: str, item_type: str, value_model: str, location: str, quantity: int) -> str:
-    if APP_BASE_URL:
-        return f"{APP_BASE_URL}/items/{item_id}"
-    lines = [
-        f"ID: {item_id}",
-        f"Name: {structured_name}",
-        f"Category: {category}",
-        f"Type: {item_type}",
-        f"Value/Model: {value_model or '-'}",
-        f"Location: {location}",
-        f"Quantity: {quantity}",
-    ]
-    return "\n".join(lines)
-
-
-def generate_qr_file(payload: str, item_id: int) -> str:
-    filename = f"item_{item_id}.png"
-    destination = QRCODE_DIR / filename
-    img = qrcode.make(payload)
-    img.save(destination)
-    return f"/uploads/qrcodes/{filename}"
-
-
-def get_duplicate_candidates(
-    conn: sqlite3.Connection,
-    category: str,
-    item_type: str,
-    value_model: str,
-    exclude_id: Optional[int] = None,
-):
-    normalized_value = normalize_value_model(value_model)
-    sql = (
-        "SELECT * FROM items WHERE lower(category)=lower(?) AND lower(item_type)=lower(?) "
-        "AND lower(ifnull(value_model,''))=lower(?)"
-    )
-    params = [category, item_type, normalized_value]
-    if exclude_id is not None:
-        sql += " AND id != ?"
-        params.append(exclude_id)
-    sql += " ORDER BY created_at DESC, id DESC LIMIT 8"
-    return conn.execute(sql, params).fetchall()
-
-
-def serialize_duplicate_rows(rows) -> list[dict]:
-    return [
-        {
-            "id": row["id"],
-            "structured_name": row["structured_name"],
-            "category": row["category"],
-            "item_type": row["item_type"],
-            "value_model": row["value_model"] or "-",
-            "location": row["location"],
-            "quantity": row["quantity"],
-            "created_at": row["created_at"],
-            "image_path": row["image_path"],
-            "qr_path": row["qr_path"],
-        }
-        for row in rows
-    ]
-
-
-def split_location(location: str) -> tuple[str, str]:
-    location = normalize_text(location)
-    if " / " in location:
-        primary, detail = location.split(" / ", 1)
-        return primary, detail
-    return location, ""
-
-
-def refresh_item_identity(conn: sqlite3.Connection, item_id: int) -> None:
-    row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Item not found.")
-    structured_name = build_structured_name(
-        row["category"], row["item_type"], row["value_model"] or "", row["location"], row["quantity"]
-    )
-    qr_payload = build_qr_payload(
-        item_id, structured_name, row["category"], row["item_type"], row["value_model"] or "", row["location"], row["quantity"]
-    )
-    qr_path = generate_qr_file(qr_payload, item_id)
-    conn.execute(
-        "UPDATE items SET structured_name = ?, qr_path = ?, qr_payload = ? WHERE id = ?",
-        (structured_name, qr_path, qr_payload, item_id),
-    )
-
-
-def make_form_state(
-    category: str = "Electronics",
-    item_type: str = "Resistor",
-    value_model: str = "",
-    location: str = LOCATION_OPTIONS[0],
-    location_detail: str = "",
-    quantity: int = 1,
-    tags: str = "",
-    notes: str = "",
-) -> dict:
-    return {
-        "category": category,
-        "item_type": item_type,
-        "value_model": value_model,
-        "location": location,
-        "location_detail": location_detail,
-        "quantity": quantity,
-        "tags": tags,
-        "notes": notes,
-    }
-
-
-# --- auth helpers ---
-def hash_password(password: str, salt: Optional[str] = None, iterations: int = 260000) -> str:
-    salt = salt or secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
-    return f"pbkdf2_sha256${iterations}${salt}${digest.hex()}"
-
-
-def verify_password(password: str) -> bool:
-    if ADMIN_PASSWORD_HASH:
-        try:
-            algo, iter_text, salt, expected = ADMIN_PASSWORD_HASH.split("$", 3)
-            if algo != "pbkdf2_sha256":
-                return False
-            computed = hashlib.pbkdf2_hmac(
-                "sha256",
-                password.encode("utf-8"),
-                salt.encode("utf-8"),
-                int(iter_text),
-            ).hex()
-            return hmac.compare_digest(computed, expected)
-        except Exception:
-            return False
-    if ADMIN_PASSWORD:
-        return hmac.compare_digest(password, ADMIN_PASSWORD)
-    return False
-
-
-def get_current_user(request: Request) -> Optional[str]:
-    user = request.session.get("user")
-    return user if user == ADMIN_USERNAME else None
-
-
-def next_value(request: Request) -> str:
-    return request.url.path + (f"?{request.url.query}" if request.url.query else "")
-
-
-def require_login(request: Request, api: bool = False):
-    if get_current_user(request):
-        return None
-    if api:
-        return JSONResponse({"detail": "Authentication required."}, status_code=401)
-    return RedirectResponse(url=f"/login?next={quote(next_value(request), safe='/?:=&')}", status_code=303)
-
-
-def local_path_from_db_path(db_path: str) -> Path:
-    relative = db_path.replace("/uploads/", "", 1).lstrip("/")
-    return UPLOAD_DIR / relative
-
-
-def media_url(db_path: Optional[str]) -> Optional[str]:
-    if not db_path:
-        return None
-    relative = db_path.replace("/uploads/", "", 1).lstrip("/")
-    return f"/media/{relative}"
-
-
-def context(request: Request, **kwargs):
-    data = {"request": request, "current_user": get_current_user(request), "media_url": media_url}
-    data.update(kwargs)
-    return data
-
-
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
-
+def find_duplicates(category: str, item_type: str, normalized_value: str, exclude_id: Optional[int]=None):
+    conn = db()
+    if exclude_id is None:
+        rows = conn.execute("""
+            SELECT * FROM items
+            WHERE category = ? AND item_type = ? AND normalized_value = ?
+            ORDER BY updated_at DESC, id DESC
+        """, (category, item_type, normalized_value)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT * FROM items
+            WHERE category = ? AND item_type = ? AND normalized_value = ? AND id != ?
+            ORDER BY updated_at DESC, id DESC
+        """, (category, item_type, normalized_value, exclude_id)).fetchall()
+    conn.close()
+    return rows
 
 @app.get("/health")
-def health():
+async def health():
     return {"status": "ok"}
 
-
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = "/"):
-    if get_current_user(request):
+async def login_page(request: Request, next: str = "/"):
+    if request.session.get("authenticated"):
         return RedirectResponse(url=next or "/", status_code=303)
-    return templates.TemplateResponse("login.html", context(request, next=next, error=""))
+    return render(request, "login.html", next=next)
 
-
-@app.post("/login", response_class=HTMLResponse)
-def login_submit(request: Request, username: str = Form(...), password: str = Form(...), next: str = Form("/")):
-    if hmac.compare_digest(username, ADMIN_USERNAME) and verify_password(password):
-        request.session["user"] = ADMIN_USERNAME
+@app.post("/login")
+async def login(request: Request, username: str = Form(...), password: str = Form(...), next: str = Form("/")):
+    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        request.session["authenticated"] = True
         return RedirectResponse(url=next or "/", status_code=303)
-    return templates.TemplateResponse(
-        "login.html",
-        context(request, next=next, error="Invalid username or password."),
-        status_code=401,
-    )
-
+    return render(request, "login.html", error="Invalid credentials.", next=next)
 
 @app.post("/logout")
-def logout(request: Request):
+async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
 
-
-@app.get("/media/{file_path:path}")
-def protected_media(request: Request, file_path: str):
-    auth = require_login(request)
-    if auth:
-        return auth
-    normalized = Path(file_path)
-    target = (UPLOAD_DIR / normalized).resolve()
-    if UPLOAD_DIR.resolve() not in target.parents and target != UPLOAD_DIR.resolve():
-        raise HTTPException(status_code=400, detail="Invalid file path.")
-    if not target.exists() or not target.is_file():
-        raise HTTPException(status_code=404, detail="File not found.")
-    return FileResponse(target)
-
-
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request, q: str = ""):
-    auth = require_login(request)
-    if auth:
-        return auth
-    with get_conn() as conn:
-        if q.strip():
-            like = f"%{q.strip()}%"
-            rows = conn.execute(
-                """
-                SELECT * FROM items
-                WHERE structured_name LIKE ?
-                   OR category LIKE ?
-                   OR item_type LIKE ?
-                   OR value_model LIKE ?
-                   OR location LIKE ?
-                   OR tags LIKE ?
-                   OR notes LIKE ?
-                ORDER BY created_at DESC, id DESC
-                """,
-                (like, like, like, like, like, like, like),
-            ).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC, id DESC").fetchall()
-    return templates.TemplateResponse(
+async def home(request: Request, q: str = ""):
+    conn = db()
+    search = q.strip()
+    if search:
+        pattern = f"%{search}%"
+        items = conn.execute("""
+            SELECT * FROM items
+            WHERE structured_name LIKE ? OR value_model LIKE ? OR location LIKE ? OR tags LIKE ? OR notes LIKE ?
+            ORDER BY updated_at DESC, id DESC
+        """, (pattern, pattern, pattern, pattern, pattern)).fetchall()
+    else:
+        items = conn.execute("SELECT * FROM items ORDER BY updated_at DESC, id DESC").fetchall()
+    conn.close()
+    return render(
+        request,
         "index.html",
-        context(
-            request,
-            items=rows,
-            q=q,
-            category_options=CATEGORY_OPTIONS,
-            type_options=TYPE_OPTIONS,
-            location_options=LOCATION_OPTIONS,
-            form_data=make_form_state(),
-            duplicate_candidates=[],
-            duplicate_message="",
-        ),
+        items=items,
+        q=q,
+        category_options=CATEGORY_OPTIONS,
+        type_options=TYPE_OPTIONS,
     )
-
-
-@app.get("/api/duplicate-check")
-def duplicate_check(
-    request: Request,
-    category: str = Query(...),
-    item_type: str = Query(...),
-    value_model: str = Query(""),
-):
-    auth = require_login(request, api=True)
-    if auth:
-        return auth
-    category = canonical_category(category)
-    item_type = canonical_type(item_type)
-    value_model = normalize_value_model(value_model)
-    if not value_model:
-        return JSONResponse({"duplicates": [], "count": 0})
-    with get_conn() as conn:
-        rows = get_duplicate_candidates(conn, category, item_type, value_model)
-    return JSONResponse({"duplicates": serialize_duplicate_rows(rows), "count": len(rows)})
-
-
-@app.get("/items/{item_id}", response_class=HTMLResponse)
-def item_detail(request: Request, item_id: int, updated: int = 0):
-    auth = require_login(request)
-    if auth:
-        return auth
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Item not found.")
-    primary_location, location_detail = split_location(row["location"] or "")
-    return templates.TemplateResponse(
-        "item_detail.html",
-        context(
-            request,
-            item=row,
-            category_options=CATEGORY_OPTIONS,
-            type_options=TYPE_OPTIONS,
-            location_options=LOCATION_OPTIONS,
-            primary_location=primary_location,
-            location_detail=location_detail,
-            updated=updated,
-        ),
-    )
-
 
 @app.post("/items")
 async def create_item(
     request: Request,
     category: str = Form(...),
     item_type: str = Form(...),
-    value_model: str = Form(""),
+    value_model: str = Form(...),
+    quantity: int = Form(...),
     location: str = Form(...),
-    location_detail: str = Form(""),
-    quantity: int = Form(1),
     tags: str = Form(""),
     notes: str = Form(""),
-    confirm_duplicate: int = Form(0),
+    confirm_duplicate: str = Form("0"),
     photo: Optional[UploadFile] = File(None),
 ):
-    auth = require_login(request)
-    if auth:
-        return auth
-    if quantity < 1:
-        raise HTTPException(status_code=400, detail="Quantity must be at least 1.")
+    normalized_value = normalize_value(item_type, value_model)
+    duplicates = find_duplicates(category, item_type, normalized_value)
 
-    category = canonical_category(category)
-    item_type = canonical_type(item_type)
-    value_model = normalize_value_model(value_model)
-    location = normalize_location(location, location_detail)
-    tags = normalize_text(tags)
-    notes = normalize_text(notes)
-
-    with get_conn() as conn:
-        duplicates = get_duplicate_candidates(conn, category, item_type, value_model) if value_model else []
-        if duplicates and not confirm_duplicate:
-            if photo and photo.file:
-                try:
-                    photo.file.close()
-                except Exception:
-                    pass
-            if request.headers.get("x-requested-with") == "XMLHttpRequest":
-                return JSONResponse(
-                    {
-                        "status": "duplicate_detected",
-                        "duplicates": serialize_duplicate_rows(duplicates),
-                        "message": f"Found {len(duplicates)} possible duplicate(s) with the same category, type, and value/model.",
-                    },
-                    status_code=409,
-                )
-            rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC, id DESC").fetchall()
-            return templates.TemplateResponse(
-                "index.html",
-                context(
-                    request,
-                    items=rows,
-                    q="",
-                    category_options=CATEGORY_OPTIONS,
-                    type_options=TYPE_OPTIONS,
-                    location_options=LOCATION_OPTIONS,
-                    form_data=make_form_state(category, item_type, value_model, location.split(" / ")[0], location.split(" / ", 1)[1] if " / " in location else "", quantity, tags, notes),
-                    duplicate_candidates=duplicates,
-                    duplicate_message=f"Found {len(duplicates)} possible duplicate(s). Re-select the photo if you still want to save this new item.",
-                ),
-                status_code=409,
-            )
-
-        structured_name = build_structured_name(category, item_type, value_model, location, quantity)
-        image_path = save_upload(photo)
-        cursor = conn.execute(
-            """
-            INSERT INTO items (structured_name, category, item_type, value_model, location, quantity, tags, notes, image_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (structured_name, category, item_type, value_model, location, quantity, tags, notes, image_path),
+    if duplicates and confirm_duplicate != "1":
+        conn = db()
+        items = conn.execute("SELECT * FROM items ORDER BY updated_at DESC, id DESC").fetchall()
+        conn.close()
+        return render(
+            request, "index.html",
+            items=items,
+            q="",
+            duplicate_warning=True,
+            duplicate_items=duplicates,
+            pending_form={
+                "category": category, "item_type": item_type, "value_model": value_model,
+                "quantity": quantity, "location": location, "tags": tags, "notes": notes
+            },
+            category_options=CATEGORY_OPTIONS,
+            type_options=TYPE_OPTIONS,
         )
-        item_id = cursor.lastrowid
-        qr_payload = build_qr_payload(item_id, structured_name, category, item_type, value_model, location, quantity)
-        qr_path = generate_qr_file(qr_payload, item_id)
-        conn.execute(
-            "UPDATE items SET qr_path = ?, qr_payload = ? WHERE id = ?",
-            (qr_path, qr_payload, item_id),
-        )
-        conn.commit()
 
-    return RedirectResponse(url=f"/?created={item_id}", status_code=303)
+    structured_name = build_structured_name(category, item_type, value_model, location, quantity)
+    photo_filename = save_upload(photo) if photo and photo.filename else ""
 
+    conn = db()
+    cur = conn.execute("""
+        INSERT INTO items (category, item_type, value_model, normalized_value, quantity, location, tags, notes, structured_name, photo_filename)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (category, item_type, value_model, normalized_value, quantity, location, tags, notes, structured_name, photo_filename))
+    item_id = cur.lastrowid
+    qr_filename = create_qr(item_id)
+    conn.execute("UPDATE items SET qr_filename = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (qr_filename, item_id))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url=f"/items/{item_id}", status_code=303)
 
-@app.post("/items/{item_id}/update")
-async def update_item(
+@app.get("/items/{item_id}", response_class=HTMLResponse)
+async def item_detail(request: Request, item_id: int):
+    item = get_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    duplicates = find_duplicates(item["category"], item["item_type"], item["normalized_value"], exclude_id=item_id)
+    return render(request, "item.html", item=item, duplicates=duplicates)
+
+@app.post("/items/{item_id}/edit")
+async def edit_item(
     request: Request,
     item_id: int,
     category: str = Form(...),
     item_type: str = Form(...),
-    value_model: str = Form(""),
+    value_model: str = Form(...),
+    quantity: int = Form(...),
     location: str = Form(...),
-    location_detail: str = Form(""),
-    quantity: int = Form(1),
     tags: str = Form(""),
     notes: str = Form(""),
     photo: Optional[UploadFile] = File(None),
 ):
-    auth = require_login(request)
-    if auth:
-        return auth
-    if quantity < 1:
-        raise HTTPException(status_code=400, detail="Quantity must be at least 1.")
+    item = get_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
 
-    category = canonical_category(category)
-    item_type = canonical_type(item_type)
-    value_model = normalize_value_model(value_model)
-    location = normalize_location(location, location_detail)
-    tags = normalize_text(tags)
-    notes = normalize_text(notes)
+    normalized_value = normalize_value(item_type, value_model)
+    structured_name = build_structured_name(category, item_type, value_model, location, quantity)
+    photo_filename = item["photo_filename"]
 
-    with get_conn() as conn:
-        existing = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-        if not existing:
-            raise HTTPException(status_code=404, detail="Item not found.")
+    if photo and photo.filename:
+        photo_filename = save_upload(photo)
 
-        image_path = existing["image_path"]
-        if photo and getattr(photo, "filename", None):
-            new_image_path = save_upload(photo)
-            old_image_path = existing["image_path"]
-            image_path = new_image_path
-            if old_image_path:
-                try:
-                    local_path = local_path_from_db_path(old_image_path)
-                    if local_path.exists():
-                        local_path.unlink()
-                except OSError:
-                    pass
+    conn = db()
+    conn.execute("""
+        UPDATE items
+        SET category=?, item_type=?, value_model=?, normalized_value=?, quantity=?, location=?, tags=?, notes=?, structured_name=?, photo_filename=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (category, item_type, value_model, normalized_value, quantity, location, tags, notes, structured_name, photo_filename, item_id))
+    qr_filename = create_qr(item_id)
+    conn.execute("UPDATE items SET qr_filename = ? WHERE id = ?", (qr_filename, item_id))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url=f"/items/{item_id}", status_code=303)
 
-        conn.execute(
-            """
-            UPDATE items
-            SET category = ?, item_type = ?, value_model = ?, location = ?, quantity = ?, tags = ?, notes = ?, image_path = ?
-            WHERE id = ?
-            """,
-            (category, item_type, value_model, location, quantity, tags, notes, image_path, item_id),
-        )
-        refresh_item_identity(conn, item_id)
-        conn.commit()
-
-    return RedirectResponse(url=f"/items/{item_id}?updated=1", status_code=303)
-
-
-@app.post("/items/{item_id}/add-quantity")
-def add_quantity(request: Request, item_id: int, amount: int = Form(...)):
-    auth = require_login(request)
-    if auth:
-        return auth
-    if amount < 1:
-        raise HTTPException(status_code=400, detail="Added quantity must be at least 1.")
-
-    with get_conn() as conn:
-        row = conn.execute("SELECT quantity FROM items WHERE id = ?", (item_id,)).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Item not found.")
-        new_quantity = int(row["quantity"]) + int(amount)
-        conn.execute("UPDATE items SET quantity = ? WHERE id = ?", (new_quantity, item_id))
-        refresh_item_identity(conn, item_id)
-        conn.commit()
-
-    return RedirectResponse(url=f"/items/{item_id}?updated=1", status_code=303)
-
+@app.post("/items/{item_id}/adjust")
+async def adjust_quantity(item_id: int, delta: int = Form(...)):
+    item = get_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    new_qty = max(0, int(item["quantity"]) + int(delta))
+    structured_name = build_structured_name(item["category"], item["item_type"], item["value_model"], item["location"], new_qty)
+    conn = db()
+    conn.execute("""
+        UPDATE items SET quantity=?, structured_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?
+    """, (new_qty, structured_name, item_id))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url=f"/items/{item_id}", status_code=303)
 
 @app.post("/items/{item_id}/delete")
-def delete_item(request: Request, item_id: int):
-    auth = require_login(request)
-    if auth:
-        return auth
-    with get_conn() as conn:
-        row = conn.execute("SELECT image_path, qr_path FROM items WHERE id = ?", (item_id,)).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Item not found.")
-        conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
-        conn.commit()
-
-    for path in (row["image_path"], row["qr_path"]):
-        if not path:
-            continue
-        try:
-            local_path = local_path_from_db_path(path)
-            if local_path.exists():
-                local_path.unlink()
-        except OSError:
-            pass
-
+async def delete_item(item_id: int):
+    item = get_item(item_id)
+    if not item:
+        return RedirectResponse(url="/", status_code=303)
+    conn = db()
+    conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
+    conn.commit()
+    conn.close()
     return RedirectResponse(url="/", status_code=303)
 
+@app.get("/media/{filename}")
+async def protected_media(filename: str):
+    path = UPLOAD_DIR / Path(filename).name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path)
+
+@app.get("/items/{item_id}/qr")
+async def download_qr(item_id: int):
+    item = get_item(item_id)
+    if not item or not item["qr_filename"]:
+        raise HTTPException(status_code=404, detail="QR not found")
+    path = UPLOAD_DIR / item["qr_filename"]
+    return FileResponse(path, media_type="image/png", filename=f"item_{item_id}_qr.png")
 
 @app.get("/labels", response_class=HTMLResponse)
-def labels_page(request: Request, q: str = Query("")):
-    auth = require_login(request)
-    if auth:
-        return auth
-    with get_conn() as conn:
-        if q.strip():
-            like = f"%{q.strip()}%"
-            rows = conn.execute(
-                """
-                SELECT * FROM items
-                WHERE structured_name LIKE ? OR category LIKE ? OR item_type LIKE ? OR value_model LIKE ? OR location LIKE ?
-                ORDER BY created_at DESC, id DESC
-                """,
-                (like, like, like, like, like),
-            ).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC, id DESC").fetchall()
-    return templates.TemplateResponse("labels.html", context(request, items=rows, q=q))
+async def labels_page(request: Request):
+    conn = db()
+    items = conn.execute("SELECT * FROM items ORDER BY updated_at DESC, id DESC").fetchall()
+    conn.close()
+    return render(request, "labels.html", items=items)
+
+@app.get("/scan", response_class=HTMLResponse)
+async def scan_page(request: Request):
+    return render(request, "scan.html")
+
+@app.get("/api/items/{item_id}")
+async def api_item(item_id: int):
+    item = get_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Not found")
+    return dict(item)

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid2">
+  <section class="card">
+    <h2>Edit Item</h2>
+
+    <form method="post" action="/items/{{ item['id'] }}/edit" enctype="multipart/form-data" class="form">
+      <label>Category
+        <input type="text" name="category" value="{{ item['category'] }}" required>
+      </label>
+      <label>Type
+        <input type="text" name="item_type" value="{{ item['item_type'] }}" required>
+      </label>
+      <label>Value / Model
+        <input type="text" name="value_model" value="{{ item['value_model'] }}" required>
+      </label>
+      <label>Quantity
+        <input type="number" min="0" name="quantity" value="{{ item['quantity'] }}" required>
+      </label>
+      <div class="btnrow">
+        <form method="post" action="/items/{{ item['id'] }}/adjust" class="inline">
+          <input type="hidden" name="delta" value="-1">
+          <button type="submit">-1</button>
+        </form>
+        <form method="post" action="/items/{{ item['id'] }}/adjust" class="inline">
+          <input type="hidden" name="delta" value="1">
+          <button type="submit">+1</button>
+        </form>
+      </div>
+      <label>Location
+        <input type="text" name="location" value="{{ item['location'] }}" required>
+      </label>
+      <label>Tags
+        <input type="text" name="tags" value="{{ item['tags'] }}">
+      </label>
+      <label>Notes
+        <textarea name="notes" rows="4">{{ item['notes'] }}</textarea>
+      </label>
+      <label>Replace Photo
+        <input type="file" name="photo" accept="image/*">
+      </label>
+      <button type="submit">Save changes</button>
+    </form>
+
+    <form method="post" action="/items/{{ item['id'] }}/delete" onsubmit="return confirm('Delete this item?')">
+      <button class="danger" type="submit">Delete item</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>{{ item['structured_name'] }}</h2>
+    <div class="muted">{{ item['item_type'] }} • {{ item['value_model'] }} • Qty {{ item['quantity'] }}</div>
+    <div class="muted">{{ item['location'] }}</div>
+
+    {% if item['photo_filename'] %}
+      <img class="photo" src="/media/{{ item['photo_filename'] }}" alt="">
+    {% endif %}
+
+    {% if item['qr_filename'] %}
+      <img class="qr" src="/media/{{ item['qr_filename'] }}" alt="QR code">
+      <div class="btnrow">
+        <a class="buttonlike" href="/items/{{ item['id'] }}/qr">Download QR</a>
+      </div>
+    {% endif %}
+
+    {% if duplicates %}
+    <div class="alert warn">
+      <strong>Related duplicate candidates:</strong>
+      <ul>
+        {% for d in duplicates %}
+        <li><a href="/items/{{ d['id'] }}">{{ d['structured_name'] }}</a> — Qty {{ d['quantity'] }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

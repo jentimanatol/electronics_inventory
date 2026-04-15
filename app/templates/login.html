@@ -1,32 +1,17 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Login • Electronics Inventory</title>
-  <link rel="stylesheet" href="/static/style.css" />
-</head>
-<body>
-  <main class="container narrow login-wrap">
-    <section class="card login-card">
-      <h1>Private Inventory Login</h1>
-      <p>Single-user access only. Sign in to view inventory, photos, QR codes, and labels.</p>
-      {% if error %}
-      <div class="warning-card card" style="margin-top:12px; padding:12px;">
-        <strong>{{ error }}</strong>
-      </div>
-      {% endif %}
-      <form action="/login" method="post" class="grid" style="margin-top:14px;">
-        <input type="hidden" name="next" value="{{ next }}" />
-        <label class="full">Username
-          <input type="text" name="username" autocomplete="username" required />
-        </label>
-        <label class="full">Password
-          <input type="password" name="password" autocomplete="current-password" required />
-        </label>
-        <button type="submit">Log in</button>
-      </form>
-    </section>
-  </main>
-</body>
-</html>
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow">
+  <h1>Login</h1>
+  {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" class="form">
+    <input type="hidden" name="next" value="{{ next or '/' }}">
+    <label>Username
+      <input type="text" name="username" required>
+    </label>
+    <label>Password
+      <input type="password" name="password" required>
+    </label>
+    <button type="submit">Sign in</button>
+  </form>
+</div>
+{% endblock %}

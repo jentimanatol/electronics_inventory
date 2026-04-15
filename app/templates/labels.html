@@ -1,43 +1,20 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Printable QR Labels</title>
-  <link rel="stylesheet" href="/static/style.css" />
-</head>
-<body class="labels-page">
-  <main class="container">
-    <section class="hero no-print">
-      <div>
-        <h1>Printable QR Labels</h1>
-        <p>Open later, download QR images, or print a whole sheet.</p>
-      </div>
-      <div class="hero-actions">
-        <form action="/labels" method="get" class="search-form">
-          <input name="q" value="{{ q }}" placeholder="Filter labels..." />
-          <button type="submit">Filter</button>
-        </form>
-        <button onclick="window.print()">Print this page</button>
-        <form action="/logout" method="post"><button class="secondary" type="submit">Log out</button></form>
-      </div>
-    </section>
-
-    <section class="labels-grid">
-      {% for item in items %}
-      <article class="label-card">
-        <img class="label-qr" src="{{ media_url(item['qr_path']) }}" alt="QR code for {{ item['structured_name'] }}" />
-        <div class="label-text">
-          <strong>{{ item['structured_name'] }}</strong>
-          <span>{{ item['item_type'] }}{% if item['value_model'] %} • {{ item['value_model'] }}{% endif %}</span>
-          <span>{{ item['location'] }}</span>
-          <span>Qty: {{ item['quantity'] }}</span>
-        </div>
-      </article>
-      {% else %}
-      <p>No labels found.</p>
-      {% endfor %}
-    </section>
-  </main>
-</body>
-</html>
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <div class="row between">
+    <h1>Printable Labels</h1>
+    <button onclick="window.print()">Print</button>
+  </div>
+  <div class="labels">
+    {% for item in items %}
+    <div class="label">
+      <div class="label-title">{{ item['item_type'] }} • {{ item['value_model'] }}</div>
+      <div class="label-sub">{{ item['location'] }} • Qty {{ item['quantity'] }}</div>
+      {% if item['qr_filename'] %}
+      <img src="/media/{{ item['qr_filename'] }}" alt="QR">
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
