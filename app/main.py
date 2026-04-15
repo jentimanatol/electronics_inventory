@@ -12,7 +12,7 @@ from urllib.parse import urljoin
 
 import qrcode
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -184,16 +184,64 @@ def generate_qr_file(payload: str, item_id: int) -> str:
     return f"/uploads/qrcodes/{filename}"
 
 
-def get_duplicate_candidates(conn: sqlite3.Connection, category: str, item_type: str, value_model: str, exclude_id: Optional[int] = None):
+def get_duplicate_candidates(
+    conn: sqlite3.Connection,
+    category: str,
+    item_type: str,
+    value_model: str,
+    exclude_id: Optional[int] = None,
+):
+    normalized_value = normalize_value_model(value_model)
     sql = (
-        "SELECT * FROM items WHERE lower(category)=lower(?) AND lower(item_type)=lower(?) AND lower(ifnull(value_model,''))=lower(?)"
+        "SELECT * FROM items WHERE lower(category)=lower(?) AND lower(item_type)=lower(?) "
+        "AND lower(ifnull(value_model,''))=lower(?)"
     )
-    params = [category, item_type, value_model]
+    params = [category, item_type, normalized_value]
     if exclude_id is not None:
         sql += " AND id != ?"
         params.append(exclude_id)
     sql += " ORDER BY created_at DESC, id DESC LIMIT 8"
     return conn.execute(sql, params).fetchall()
+
+
+def serialize_duplicate_rows(rows) -> list[dict]:
+    return [
+        {
+            "id": row["id"],
+            "structured_name": row["structured_name"],
+            "category": row["category"],
+            "item_type": row["item_type"],
+            "value_model": row["value_model"] or "-",
+            "location": row["location"],
+            "quantity": row["quantity"],
+            "created_at": row["created_at"],
+            "image_path": row["image_path"],
+            "qr_path": row["qr_path"],
+        }
+        for row in rows
+    ]
+
+
+def make_form_state(
+    category: str = "Electronics",
+    item_type: str = "Resistor",
+    value_model: str = "",
+    location: str = LOCATION_OPTIONS[0],
+    location_detail: str = "",
+    quantity: int = 1,
+    tags: str = "",
+    notes: str = "",
+) -> dict:
+    return {
+        "category": category,
+        "item_type": item_type,
+        "value_model": value_model,
+        "location": location,
+        "location_detail": location_detail,
+        "quantity": quantity,
+        "tags": tags,
+        "notes": notes,
+    }
 
 
 @app.on_event("startup")
@@ -236,8 +284,27 @@ def home(request: Request, q: str = ""):
             "category_options": CATEGORY_OPTIONS,
             "type_options": TYPE_OPTIONS,
             "location_options": LOCATION_OPTIONS,
+            "form_data": make_form_state(),
+            "duplicate_candidates": [],
+            "duplicate_message": "",
         },
     )
+
+
+@app.get("/api/duplicate-check")
+def duplicate_check(
+    category: str = Query(...),
+    item_type: str = Query(...),
+    value_model: str = Query(""),
+):
+    category = canonical_category(category)
+    item_type = canonical_type(item_type)
+    value_model = normalize_value_model(value_model)
+    if not value_model:
+        return JSONResponse({"duplicates": [], "count": 0})
+    with get_conn() as conn:
+        rows = get_duplicate_candidates(conn, category, item_type, value_model)
+    return JSONResponse({"duplicates": serialize_duplicate_rows(rows), "count": len(rows)})
 
 
 @app.get("/items/{item_id}", response_class=HTMLResponse)
@@ -260,6 +327,7 @@ async def create_item(
     quantity: int = Form(1),
     tags: str = Form(""),
     notes: str = Form(""),
+    confirm_duplicate: int = Form(0),
     photo: Optional[UploadFile] = File(None),
 ):
     if quantity < 1:
@@ -272,10 +340,42 @@ async def create_item(
     tags = normalize_text(tags)
     notes = normalize_text(notes)
 
-    structured_name = build_structured_name(category, item_type, value_model, location, quantity)
-    image_path = save_upload(photo)
-
     with get_conn() as conn:
+        duplicates = get_duplicate_candidates(conn, category, item_type, value_model) if value_model else []
+        if duplicates and not confirm_duplicate:
+            if photo and photo.file:
+                try:
+                    photo.file.close()
+                except Exception:
+                    pass
+            if request.headers.get("x-requested-with") == "XMLHttpRequest":
+                return JSONResponse(
+                    {
+                        "status": "duplicate_detected",
+                        "duplicates": serialize_duplicate_rows(duplicates),
+                        "message": f"Found {len(duplicates)} possible duplicate(s) with the same category, type, and value/model.",
+                    },
+                    status_code=409,
+                )
+            rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC, id DESC").fetchall()
+            return templates.TemplateResponse(
+                "index.html",
+                {
+                    "request": request,
+                    "items": rows,
+                    "q": "",
+                    "category_options": CATEGORY_OPTIONS,
+                    "type_options": TYPE_OPTIONS,
+                    "location_options": LOCATION_OPTIONS,
+                    "form_data": make_form_state(category, item_type, value_model, location.split(" / ")[0], location.split(" / ", 1)[1] if " / " in location else "", quantity, tags, notes),
+                    "duplicate_candidates": duplicates,
+                    "duplicate_message": f"Found {len(duplicates)} possible duplicate(s). Re-select the photo if you still want to save this new item.",
+                },
+                status_code=409,
+            )
+
+        structured_name = build_structured_name(category, item_type, value_model, location, quantity)
+        image_path = save_upload(photo)
         cursor = conn.execute(
             """
             INSERT INTO items (structured_name, category, item_type, value_model, location, quantity, tags, notes, image_path)

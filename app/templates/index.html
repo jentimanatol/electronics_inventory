@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -19,36 +18,59 @@
       </div>
     </section>
 
+    {% if duplicate_message %}
+    <section class="card warning-card">
+      <h2>Possible duplicate found</h2>
+      <p>{{ duplicate_message }}</p>
+      <div class="duplicate-list compact">
+        {% for item in duplicate_candidates %}
+        <article class="duplicate-card">
+          <div>
+            <strong>{{ item['structured_name'] }}</strong>
+            <p><strong>Value/Model:</strong> {{ item['value_model'] or '-' }}</p>
+            <p><strong>Location:</strong> {{ item['location'] }}</p>
+            <p><strong>Quantity:</strong> {{ item['quantity'] }}</p>
+          </div>
+          <a class="button-link small secondary" href="/items/{{ item['id'] }}" target="_blank">Open existing item</a>
+        </article>
+        {% endfor %}
+      </div>
+      <p class="muted-note">If you still want a separate entry, re-select the photo and click save again after confirming in the popup.</p>
+    </section>
+    {% endif %}
+
     <section class="card">
       <h2>Add electronics item</h2>
-      <form action="/items" method="post" enctype="multipart/form-data" class="grid">
+      <form action="/items" method="post" enctype="multipart/form-data" class="grid" id="item-form">
+        <input type="hidden" name="confirm_duplicate" id="confirm-duplicate" value="0" />
         <label>Category
-          <select name="category">
+          <select name="category" id="category-select">
             {% for option in category_options %}
-              <option value="{{ option }}" {% if option == 'Electronics' %}selected{% endif %}>{{ option }}</option>
+              <option value="{{ option }}" {% if option == form_data.category %}selected{% endif %}>{{ option }}</option>
             {% endfor %}
           </select>
         </label>
         <label>Type
-          <select name="item_type" required>
+          <select name="item_type" id="type-select" required>
             {% for option in type_options %}
-              <option value="{{ option }}">{{ option }}</option>
+              <option value="{{ option }}" {% if option == form_data.item_type %}selected{% endif %}>{{ option }}</option>
             {% endfor %}
           </select>
         </label>
-        <label>Value / Model<input name="value_model" placeholder="10k, 100uF 25V, AD5933, Arduino Nano" /></label>
+        <label>Value / Model<input name="value_model" id="value-model-input" placeholder="10k, 100uF 25V, AD5933, Arduino Nano" value="{{ form_data.value_model }}" /></label>
         <label>Primary location
           <select name="location" required>
             {% for option in location_options %}
-              <option value="{{ option }}">{{ option }}</option>
+              <option value="{{ option }}" {% if option == form_data.location %}selected{% endif %}>{{ option }}</option>
             {% endfor %}
           </select>
         </label>
-        <label>Location detail<input name="location_detail" placeholder="Slot 4, bag 2, anti-static bin" /></label>
-        <label>Quantity<input name="quantity" type="number" value="1" min="1" required /></label>
-        <label>Tags<input name="tags" placeholder="spare, tested, 5V, through-hole" /></label>
-        <label class="full">Notes<textarea name="notes" rows="3" placeholder="Any detail that helps later"></textarea></label>
+        <label>Location detail<input name="location_detail" placeholder="Slot 4, bag 2, anti-static bin" value="{{ form_data.location_detail }}" /></label>
+        <label>Quantity<input name="quantity" type="number" value="{{ form_data.quantity }}" min="1" required /></label>
+        <label>Tags<input name="tags" placeholder="spare, tested, 5V, through-hole" value="{{ form_data.tags }}" /></label>
+        <label class="full">Notes<textarea name="notes" rows="3" placeholder="Any detail that helps later">{{ form_data.notes }}</textarea></label>
         <label class="full">Photo<input name="photo" type="file" accept="image/*" capture="environment" /></label>
+        <div class="full duplicate-inline hidden" id="duplicate-inline"></div>
         <button type="submit">Save item + generate QR</button>
       </form>
     </section>
@@ -100,5 +122,93 @@
       </div>
     </section>
   </main>
+
+  <script>
+    const form = document.getElementById('item-form');
+    const confirmDuplicateInput = document.getElementById('confirm-duplicate');
+    const duplicateInline = document.getElementById('duplicate-inline');
+    const categorySelect = document.getElementById('category-select');
+    const typeSelect = document.getElementById('type-select');
+    const valueModelInput = document.getElementById('value-model-input');
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function renderDuplicateWarning(duplicates) {
+      if (!duplicates.length) {
+        duplicateInline.classList.add('hidden');
+        duplicateInline.innerHTML = '';
+        return;
+      }
+      const rows = duplicates.map(item => `
+        <article class="duplicate-card">
+          <div>
+            <strong>${escapeHtml(item.structured_name)}</strong>
+            <p><strong>Value/Model:</strong> ${escapeHtml(item.value_model || '-')}</p>
+            <p><strong>Location:</strong> ${escapeHtml(item.location)}</p>
+            <p><strong>Quantity:</strong> ${escapeHtml(item.quantity)}</p>
+          </div>
+          <a class="button-link small secondary" target="_blank" href="/items/${item.id}">Open existing item</a>
+        </article>`).join('');
+      duplicateInline.classList.remove('hidden');
+      duplicateInline.innerHTML = `
+        <div class="warning-card inline-warning">
+          <h3>Possible duplicate detected</h3>
+          <p>The same category, type, and value/model already exist. Review before saving another copy.</p>
+          <div class="duplicate-list compact">${rows}</div>
+        </div>`;
+    }
+
+    async function checkDuplicates() {
+      const valueModel = valueModelInput.value.trim();
+      if (!valueModel) {
+        renderDuplicateWarning([]);
+        return [];
+      }
+      const url = new URL('/api/duplicate-check', window.location.origin);
+      url.searchParams.set('category', categorySelect.value);
+      url.searchParams.set('item_type', typeSelect.value);
+      url.searchParams.set('value_model', valueModel);
+      try {
+        const response = await fetch(url.toString(), {headers: {'Accept': 'application/json'}});
+        const data = await response.json();
+        const duplicates = data.duplicates || [];
+        renderDuplicateWarning(duplicates);
+        return duplicates;
+      } catch (error) {
+        console.error('Duplicate check failed', error);
+        return [];
+      }
+    }
+
+    valueModelInput.addEventListener('blur', checkDuplicates);
+    typeSelect.addEventListener('change', checkDuplicates);
+    categorySelect.addEventListener('change', checkDuplicates);
+
+    form.addEventListener('submit', async (event) => {
+      if (confirmDuplicateInput.value === '1') {
+        return;
+      }
+      const duplicates = await checkDuplicates();
+      if (!duplicates.length) {
+        return;
+      }
+      event.preventDefault();
+      const names = duplicates.slice(0, 3).map(item => item.structured_name).join('\n');
+      const proceed = window.confirm(
+        `Possible duplicates found:\n\n${names}\n\nPress OK to save anyway, or Cancel to review.`
+      );
+      if (proceed) {
+        confirmDuplicateInput.value = '1';
+        form.submit();
+      }
+    });
+  </script>
 </body>
 </html>

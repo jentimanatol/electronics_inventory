@@ -140,3 +140,13 @@ button.danger { background: var(--danger); color: white; }
   .labels-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .label-card { page-break-inside: avoid; }
 }
+
+
+.warning-card { border: 1px solid #7a5f18; background: #2a2210; }
+.inline-warning { margin-top: 6px; }
+.duplicate-inline.hidden { display: none; }
+.duplicate-list { display: grid; gap: 10px; margin-top: 12px; }
+.duplicate-list.compact { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.duplicate-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; background: #141a2d; }
+.duplicate-card p { margin: 6px 0 0; color: var(--muted); }
+.muted-note { color: var(--muted); }
