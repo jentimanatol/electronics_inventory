@@ -222,6 +222,32 @@ def serialize_duplicate_rows(rows) -> list[dict]:
     ]
 
 
+
+
+def split_location(location: str) -> tuple[str, str]:
+    location = normalize_text(location)
+    if " / " in location:
+        primary, detail = location.split(" / ", 1)
+        return primary, detail
+    return location, ""
+
+
+def refresh_item_identity(conn: sqlite3.Connection, item_id: int) -> None:
+    row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Item not found.")
+    structured_name = build_structured_name(
+        row["category"], row["item_type"], row["value_model"] or "", row["location"], row["quantity"]
+    )
+    qr_payload = build_qr_payload(
+        item_id, structured_name, row["category"], row["item_type"], row["value_model"] or "", row["location"], row["quantity"]
+    )
+    qr_path = generate_qr_file(qr_payload, item_id)
+    conn.execute(
+        "UPDATE items SET structured_name = ?, qr_path = ?, qr_payload = ? WHERE id = ?",
+        (structured_name, qr_path, qr_payload, item_id),
+    )
+
 def make_form_state(
     category: str = "Electronics",
     item_type: str = "Resistor",
@@ -308,12 +334,25 @@ def duplicate_check(
 
 
 @app.get("/items/{item_id}", response_class=HTMLResponse)
-def item_detail(request: Request, item_id: int):
+def item_detail(request: Request, item_id: int, updated: int = 0):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Item not found.")
-    return templates.TemplateResponse("item_detail.html", {"request": request, "item": row})
+    primary_location, location_detail = split_location(row["location"] or "")
+    return templates.TemplateResponse(
+        "item_detail.html",
+        {
+            "request": request,
+            "item": row,
+            "category_options": CATEGORY_OPTIONS,
+            "type_options": TYPE_OPTIONS,
+            "location_options": LOCATION_OPTIONS,
+            "primary_location": primary_location,
+            "location_detail": location_detail,
+            "updated": updated,
+        },
+    )
 
 
 @app.post("/items")
@@ -393,6 +432,79 @@ async def create_item(
         conn.commit()
 
     return RedirectResponse(url=f"/?created={item_id}", status_code=303)
+
+
+@app.post("/items/{item_id}/update")
+async def update_item(
+    item_id: int,
+    category: str = Form(...),
+    item_type: str = Form(...),
+    value_model: str = Form(""),
+    location: str = Form(...),
+    location_detail: str = Form(""),
+    quantity: int = Form(1),
+    tags: str = Form(""),
+    notes: str = Form(""),
+    photo: Optional[UploadFile] = File(None),
+):
+    if quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1.")
+
+    category = canonical_category(category)
+    item_type = canonical_type(item_type)
+    value_model = normalize_value_model(value_model)
+    location = normalize_location(location, location_detail)
+    tags = normalize_text(tags)
+    notes = normalize_text(notes)
+
+    with get_conn() as conn:
+        existing = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Item not found.")
+
+        image_path = existing["image_path"]
+        if photo and getattr(photo, "filename", None):
+            new_image_path = save_upload(photo)
+            old_image_path = existing["image_path"]
+            image_path = new_image_path
+            if old_image_path:
+                try:
+                    relative = old_image_path.replace("/uploads/", "")
+                    local_path = UPLOAD_DIR / relative
+                    if local_path.exists():
+                        local_path.unlink()
+                except OSError:
+                    pass
+
+        conn.execute(
+            """
+            UPDATE items
+            SET category = ?, item_type = ?, value_model = ?, location = ?, quantity = ?, tags = ?, notes = ?, image_path = ?
+            WHERE id = ?
+            """,
+            (category, item_type, value_model, location, quantity, tags, notes, image_path, item_id),
+        )
+        refresh_item_identity(conn, item_id)
+        conn.commit()
+
+    return RedirectResponse(url=f"/items/{item_id}?updated=1", status_code=303)
+
+
+@app.post("/items/{item_id}/add-quantity")
+def add_quantity(item_id: int, amount: int = Form(...)):
+    if amount < 1:
+        raise HTTPException(status_code=400, detail="Added quantity must be at least 1.")
+
+    with get_conn() as conn:
+        row = conn.execute("SELECT quantity FROM items WHERE id = ?", (item_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Item not found.")
+        new_quantity = int(row["quantity"]) + int(amount)
+        conn.execute("UPDATE items SET quantity = ? WHERE id = ?", (new_quantity, item_id))
+        refresh_item_identity(conn, item_id)
+        conn.commit()
+
+    return RedirectResponse(url=f"/items/{item_id}?updated=1", status_code=303)
 
 
 @app.post("/items/{item_id}/delete")

@@ -150,3 +150,9 @@ button.danger { background: var(--danger); color: white; }
 .duplicate-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; background: #141a2d; }
 .duplicate-card p { margin: 6px 0 0; color: var(--muted); }
 .muted-note { color: var(--muted); }
+
+
+.success-card { border: 1px solid rgba(80, 200, 120, 0.35); }
+.inline-form { display:flex; gap:0.75rem; align-items:end; flex-wrap:wrap; }
+.compact-form label { margin:0; }
+.compact-form input { width: 7rem; }
