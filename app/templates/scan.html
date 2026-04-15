@@ -2,13 +2,16 @@
 {% block content %}
 <div class="card">
   <h1>Scan QR</h1>
-  <p class="muted">Use your phone camera or paste a scanned URL.</p>
+  <p class="muted">Use your phone camera or paste a scanned item URL.</p>
+
   <div class="btnrow">
-    <button onclick="startScanner()">Start camera scanner</button>
+    <button type="button" onclick="startScanner()">Start camera scanner</button>
   </div>
-  <div id="reader" style="max-width:420px"></div>
+
+  <div id="reader" style="max-width:420px;margin-top:12px;"></div>
 
   <hr>
+
   <form class="form" onsubmit="openScanned(event)">
     <label>Paste scanned URL
       <input type="text" id="manualUrl" placeholder="https://.../items/123">
@@ -26,7 +29,7 @@ function openScanned(ev){
   if(url) window.location.href = url;
 }
 function startScanner(){
-  const el = document.getElementById("reader");
+  const reader = document.getElementById("reader");
   scanner = new Html5Qrcode("reader");
   scanner.start(
     { facingMode: "environment" },
@@ -37,8 +40,8 @@ function startScanner(){
       });
     },
     () => {}
-  ).catch(err => {
-    el.innerHTML = "<p>Camera scanner could not start. Use the manual field below.</p>";
+  ).catch(() => {
+    reader.innerHTML = "<p>Camera scanner could not start. Use the manual field below.</p>";
   });
 }
 </script>

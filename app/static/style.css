@@ -1,32 +1,58 @@
-:root { --bg:#0e1116; --card:#171b22; --line:#2a313c; --text:#e7edf5; --muted:#9aa7b5; --accent:#4ea1ff; --warn:#5a4515; }
-* { box-sizing: border-box; }
+:root {
+  --bg:#0e1116;
+  --card:#171b22;
+  --line:#2a313c;
+  --text:#e7edf5;
+  --muted:#9aa7b5;
+  --accent:#2c7be5;
+  --warn-bg:#4a3810;
+}
+* { box-sizing:border-box; }
 body { margin:0; font-family:Arial,Helvetica,sans-serif; background:var(--bg); color:var(--text); }
-a { color:var(--accent); text-decoration:none; }
-.topbar { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--line); background:#11151b; position:sticky; top:0; }
-.brand a { color:#fff; font-weight:700; }
-.nav { display:flex; gap:14px; align-items:center; }
-.wrap { padding:18px; max-width:1200px; margin:0 auto; }
+a { color:#9ecbff; text-decoration:none; }
+.topbar {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:14px 18px; border-bottom:1px solid var(--line); background:#11151b;
+}
+.brand a { color:white; font-weight:700; }
+.nav { display:flex; align-items:center; gap:12px; }
+.wrap { max-width:1200px; margin:0 auto; padding:18px; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:16px; }
 .narrow { max-width:420px; margin:40px auto; }
 .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-@media (max-width: 900px){ .grid2 { grid-template-columns:1fr; } }
+@media (max-width: 900px) { .grid2 { grid-template-columns:1fr; } }
 .form { display:grid; gap:12px; }
 label { display:grid; gap:6px; font-size:14px; }
-input, textarea, select, button { font:inherit; border-radius:10px; border:1px solid var(--line); padding:10px 12px; background:#0f141a; color:var(--text); }
-button, .buttonlike { cursor:pointer; background:#1b6fd6; color:white; border:none; display:inline-block; }
+input, textarea, select, button {
+  font:inherit; border-radius:10px; border:1px solid var(--line);
+  padding:10px 12px; background:#0f141a; color:var(--text);
+}
+button, .buttonlike {
+  background:var(--accent); color:white; border:none; cursor:pointer;
+  display:inline-block; padding:10px 14px; border-radius:10px;
+}
 button.danger { background:#b23a3a; margin-top:12px; }
-.inline { display:inline; }
-.btnrow { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
-.row { display:flex; gap:10px; align-items:center; }
+.inline-form { display:inline; margin:0; }
+.row { display:flex; align-items:center; gap:10px; }
 .between { justify-content:space-between; }
-.alert { border:1px solid #734; background:#3a1822; padding:10px 12px; border-radius:10px; margin-bottom:12px; }
-.alert.warn { border-color:#8a6a1f; background:var(--warn); }
+.search-form { display:flex; gap:8px; }
+.alert {
+  padding:10px 12px; border-radius:10px; margin-bottom:12px;
+  background:#40202b; border:1px solid #7a3d56;
+}
+.alert.warn { background:var(--warn-bg); border-color:#8b6a18; }
 .muted { color:var(--muted); font-size:14px; }
 .items { display:grid; gap:10px; }
-.item { display:flex; justify-content:space-between; align-items:center; gap:12px; border:1px solid var(--line); border-radius:12px; padding:10px; background:#10151c; }
-.thumb { width:72px; height:72px; object-fit:cover; border-radius:10px; border:1px solid var(--line); }
+.item {
+  display:flex; justify-content:space-between; gap:12px;
+  border:1px solid var(--line); border-radius:12px; padding:10px; background:#10151c;
+}
+.item-meta { flex:1; min-width:0; }
+.title { font-weight:700; display:block; margin-bottom:6px; overflow-wrap:anywhere; }
+.thumb { width:84px; height:84px; object-fit:cover; border-radius:10px; border:1px solid var(--line); }
 .photo { max-width:100%; max-height:420px; border-radius:12px; border:1px solid var(--line); margin-top:12px; }
 .qr { width:220px; max-width:100%; background:white; padding:8px; border-radius:12px; margin-top:12px; }
+.btnrow { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0; }
 .labels { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:12px; }
 .label { border:1px dashed #777; border-radius:10px; padding:10px; background:white; color:black; }
 .label img { width:100%; height:auto; }

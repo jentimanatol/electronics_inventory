@@ -14,7 +14,6 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.middleware.sessions import SessionMiddleware
 
-
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "change-me")
@@ -30,11 +29,11 @@ DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Electronics Inventory")
 
-# IMPORTANT: SessionMiddleware must be added BEFORE using request.session
+# Session middleware must exist before request.session is accessed anywhere.
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
-    https_only=False,   # set True later if needed
+    https_only=False,
     same_site="lax",
 )
 
@@ -87,11 +86,9 @@ init_db()
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
-    # public routes
     if path in PUBLIC_PATHS or path.startswith("/static"):
         return await call_next(request)
 
-    # protected media can stay behind login too
     if request.session.get("authenticated") is True:
         return await call_next(request)
 
@@ -111,14 +108,14 @@ def render(request: Request, template_name: str, **context):
 
 
 def slugify(text: str) -> str:
-    text = text.strip().upper()
+    text = (text or "").strip().upper()
     text = re.sub(r"[^A-Z0-9]+", "_", text)
     text = re.sub(r"_+", "_", text).strip("_")
     return text or "NA"
 
 
 def normalize_value(item_type: str, value: str) -> str:
-    s = value.strip().lower().replace(" ", "")
+    s = (value or "").strip().lower().replace(" ", "")
     if not s:
         return ""
 
@@ -127,7 +124,7 @@ def normalize_value(item_type: str, value: str) -> str:
         if m:
             num = float(m.group(1))
             suffix = m.group(2)
-            mult = {"": 1, "r": 1, "k": 1000, "m": 1000000}.get(suffix, 1)
+            mult = {"": 1, "r": 1, "k": 1_000, "m": 1_000_000}.get(suffix, 1)
             return f"{int(num * mult)}OHM"
 
     if item_type.lower() == "capacitor":
@@ -142,13 +139,15 @@ def normalize_value(item_type: str, value: str) -> str:
 
 
 def build_structured_name(category: str, item_type: str, value_model: str, location: str, quantity: int) -> str:
-    return "_".join([
-        slugify(category),
-        slugify(item_type),
-        slugify(value_model),
-        slugify(location),
-        f"{quantity}PCS",
-    ])
+    return "_".join(
+        [
+            slugify(category),
+            slugify(item_type),
+            slugify(value_model),
+            slugify(location),
+            f"{quantity}PCS",
+        ]
+    )
 
 
 def save_upload(file: UploadFile) -> str:
@@ -199,6 +198,12 @@ def find_duplicates(category: str, item_type: str, normalized_value: str, exclud
     return rows
 
 
+TYPE_OPTIONS = [
+    "Resistor", "Capacitor", "Inductor", "Diode", "Transistor", "IC",
+    "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply", "Tool", "Other"
+]
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -221,7 +226,7 @@ async def login(
     if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
         request.session["authenticated"] = True
         return RedirectResponse(url=next or "/", status_code=303)
-    return render(request, "login.html", error="Invalid credentials.", next=next)
+    return render(request, "login.html", next=next, error="Invalid credentials.")
 
 
 @app.post("/logout")
@@ -257,11 +262,7 @@ async def home(request: Request, q: str = ""):
         "index.html",
         items=items,
         q=q,
-        category_options=["Electronics"],
-        type_options=[
-            "Resistor", "Capacitor", "Inductor", "Diode", "Transistor", "IC",
-            "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply", "Tool", "Other"
-        ],
+        type_options=TYPE_OPTIONS,
     )
 
 
@@ -290,6 +291,7 @@ async def create_item(
             "index.html",
             items=items,
             q="",
+            type_options=TYPE_OPTIONS,
             duplicate_warning=True,
             duplicate_items=duplicates,
             pending_form={
@@ -301,11 +303,6 @@ async def create_item(
                 "tags": tags,
                 "notes": notes,
             },
-            category_options=["Electronics"],
-            type_options=[
-                "Resistor", "Capacitor", "Inductor", "Diode", "Transistor", "IC",
-                "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply", "Tool", "Other"
-            ],
         )
 
     structured_name = build_structured_name(category, item_type, value_model, location, quantity)
@@ -321,8 +318,16 @@ async def create_item(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            category, item_type, value_model, normalized_value,
-            quantity, location, tags, notes, structured_name, photo_filename
+            category,
+            item_type,
+            value_model,
+            normalized_value,
+            quantity,
+            location,
+            tags,
+            notes,
+            structured_name,
+            photo_filename,
         ),
     )
     item_id = cur.lastrowid
@@ -349,7 +354,7 @@ async def item_detail(request: Request, item_id: int):
         item["normalized_value"],
         exclude_id=item_id,
     )
-    return render(request, "item.html", item=item, duplicates=duplicates)
+    return render(request, "item.html", item=item, duplicates=duplicates, type_options=TYPE_OPTIONS)
 
 
 @app.post("/items/{item_id}/edit")
@@ -385,9 +390,17 @@ async def edit_item(
         WHERE id=?
         """,
         (
-            category, item_type, value_model, normalized_value,
-            quantity, location, tags, notes, structured_name,
-            photo_filename, item_id
+            category,
+            item_type,
+            value_model,
+            normalized_value,
+            quantity,
+            location,
+            tags,
+            notes,
+            structured_name,
+            photo_filename,
+            item_id,
         ),
     )
     qr_filename = create_qr(item_id)
@@ -406,11 +419,7 @@ async def adjust_quantity(item_id: int, delta: int = Form(...)):
 
     new_qty = max(0, int(item["quantity"]) + int(delta))
     structured_name = build_structured_name(
-        item["category"],
-        item["item_type"],
-        item["value_model"],
-        item["location"],
-        new_qty,
+        item["category"], item["item_type"], item["value_model"], item["location"], new_qty
     )
 
     conn = db()
@@ -420,20 +429,17 @@ async def adjust_quantity(item_id: int, delta: int = Form(...)):
     )
     conn.commit()
     conn.close()
-
     return RedirectResponse(url=f"/items/{item_id}", status_code=303)
 
 
 @app.post("/items/{item_id}/delete")
 async def delete_item(item_id: int):
     item = get_item(item_id)
-    if not item:
-        return RedirectResponse(url="/", status_code=303)
-
-    conn = db()
-    conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
-    conn.commit()
-    conn.close()
+    if item:
+        conn = db()
+        conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
+        conn.commit()
+        conn.close()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -468,11 +474,3 @@ async def labels_page(request: Request):
 @app.get("/scan", response_class=HTMLResponse)
 async def scan_page(request: Request):
     return render(request, "scan.html")
-
-
-@app.get("/api/items/{item_id}")
-async def api_item(item_id: int):
-    item = get_item(item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Not found")
-    return dict(item)

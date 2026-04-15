@@ -2,33 +2,25 @@
 {% block content %}
 <div class="grid2">
   <section class="card">
-    <h2>Add Item</h2>
+    <h2>Add electronics item</h2>
 
     {% if duplicate_warning %}
     <div class="alert warn">
       <strong>Possible duplicates found.</strong>
-      Open the existing item and edit quantity/details there, or confirm save anyway.
       <ul>
         {% for d in duplicate_items %}
-        <li>
-          <a href="/items/{{ d['id'] }}">{{ d['structured_name'] }}</a>
-          — Qty {{ d['quantity'] }} — {{ d['location'] }}
-        </li>
+        <li><a href="/items/{{ d['id'] }}">{{ d['structured_name'] }}</a> — Qty {{ d['quantity'] }} — {{ d['location'] }}</li>
         {% endfor %}
       </ul>
+      <p>You can open the existing item and edit quantity/details there, or save anyway below.</p>
     </div>
     {% endif %}
 
     <form method="post" action="/items" enctype="multipart/form-data" class="form">
       <input type="hidden" name="confirm_duplicate" value="{% if duplicate_warning %}1{% else %}0{% endif %}">
       <label>Category
-        <select name="category" required>
-          {% for c in category_options %}
-          <option value="{{ c }}" {% if pending_form and pending_form.category == c %}selected{% endif %}>{{ c }}</option>
-          {% endfor %}
-        </select>
+        <input type="text" name="category" value="{{ pending_form.category if pending_form else 'Electronics' }}" required>
       </label>
-
       <label>Type
         <select name="item_type" required>
           {% for t in type_options %}
@@ -36,42 +28,33 @@
           {% endfor %}
         </select>
       </label>
-
       <label>Value / Model
-        <input type="text" name="value_model" required value="{{ pending_form.value_model if pending_form else '' }}">
+        <input type="text" name="value_model" value="{{ pending_form.value_model if pending_form else '' }}" required>
       </label>
-
       <label>Quantity
-        <input type="number" min="0" name="quantity" required value="{{ pending_form.quantity if pending_form else 1 }}">
+        <input type="number" name="quantity" min="0" value="{{ pending_form.quantity if pending_form else 1 }}" required>
       </label>
-
       <label>Location
-        <input type="text" name="location" required placeholder="Box 1 / Drawer A2" value="{{ pending_form.location if pending_form else '' }}">
+        <input type="text" name="location" value="{{ pending_form.location if pending_form else '' }}" placeholder="Box 1 / Drawer A2" required>
       </label>
-
       <label>Tags
         <input type="text" name="tags" value="{{ pending_form.tags if pending_form else '' }}">
       </label>
-
       <label>Notes
         <textarea name="notes" rows="3">{{ pending_form.notes if pending_form else '' }}</textarea>
       </label>
-
       <label>Photo
         <input type="file" name="photo" accept="image/*">
       </label>
-
-      <div class="btnrow">
-        <button type="submit">{% if duplicate_warning %}Save anyway{% else %}Save item{% endif %}</button>
-      </div>
+      <button type="submit">{% if duplicate_warning %}Save anyway{% else %}Save item + generate QR{% endif %}</button>
     </form>
   </section>
 
   <section class="card">
     <div class="row between">
-      <h2>Inventory</h2>
-      <form method="get" action="/" class="inline">
-        <input type="text" name="q" placeholder="Search" value="{{ q or '' }}">
+      <h2>Search inventory</h2>
+      <form method="get" action="/" class="inline-form search-form">
+        <input type="text" name="q" value="{{ q or '' }}" placeholder="10k, Arduino, Drawer A2">
         <button type="submit">Search</button>
       </form>
     </div>
@@ -79,10 +62,13 @@
     <div class="items">
       {% for item in items %}
       <article class="item">
-        <div>
+        <div class="item-meta">
           <a class="title" href="/items/{{ item['id'] }}">{{ item['structured_name'] }}</a>
-          <div class="muted">{{ item['item_type'] }} • {{ item['value_model'] }} • Qty {{ item['quantity'] }}</div>
-          <div class="muted">{{ item['location'] }}</div>
+          <div class="muted">Category: {{ item['category'] }}</div>
+          <div class="muted">Type: {{ item['item_type'] }}</div>
+          <div class="muted">Value/Model: {{ item['value_model'] }}</div>
+          <div class="muted">Location: {{ item['location'] }}</div>
+          <div class="muted">Qty: {{ item['quantity'] }}</div>
         </div>
         {% if item['photo_filename'] %}
         <img class="thumb" src="/media/{{ item['photo_filename'] }}" alt="">

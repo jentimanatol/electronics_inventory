@@ -1,43 +1,37 @@
-# Electronics Inventory (Private, Single User)
+# Electronics Inventory - Private Single User
 
-FastAPI app for a private electronics inventory with:
+Working FastAPI project with:
 - single-user login
+- Railway healthcheck-safe `/health`
+- persistent uploads/QR under `/app/uploads`
 - duplicate detection
-- editable items
-- QR generation per item
-- printable labels page
-- protected photos and QR images
-- public `/health` endpoint for Railway
+- edit existing item
+- quantity adjust
+- QR generation/download
+- printable labels
+- phone-camera QR scan page
 
-## Railway variables
-Set these in Railway:
-
-- `APP_BASE_URL=https://your-domain.up.railway.app`
+## Railway Variables
+Set these:
+- `APP_BASE_URL=https://electronicsinventory-production.up.railway.app`
 - `ADMIN_USERNAME=your_username`
 - `ADMIN_PASSWORD=your_strong_password`
-- `SECRET_KEY=long_random_secret_value`
+- `SECRET_KEY=long_random_secret`
 
 Optional:
 - `UPLOAD_DIR=/app/uploads`
 - `DB_PATH=/app/uploads/inventory.db`
 
-## Persistent volume
-Mount your Railway volume to:
-
+## Railway Volume
+Mount your volume to:
 `/app/uploads`
 
-## Local run
-
+## Local Run
 ```bash
 pip install -r requirements.txt
-export ADMIN_USERNAME=admin
-export ADMIN_PASSWORD=change-me
-export SECRET_KEY=dev-secret
 export APP_BASE_URL=http://127.0.0.1:8000
+export ADMIN_USERNAME=admin
+export ADMIN_PASSWORD=admin
+export SECRET_KEY=dev-secret
 uvicorn app.main:app --reload
 ```
-
-Open:
-- `/login`
-- `/health`
-- `/labels`
