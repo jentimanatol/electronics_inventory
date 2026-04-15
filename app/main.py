@@ -1,20 +1,23 @@
-
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import uuid
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urljoin
+from urllib.parse import quote
 
 import qrcode
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "inventory.db"
@@ -23,6 +26,11 @@ QRCODE_DIR = UPLOAD_DIR / "qrcodes"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 QRCODE_DIR.mkdir(parents=True, exist_ok=True)
 APP_BASE_URL = os.getenv("APP_BASE_URL", "").rstrip("/")
+SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret-key-immediately")
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "inventory_session")
 
 CATEGORY_OPTIONS = [
     "Electronics", "Cable", "Tool", "Hardware", "Other"
@@ -37,9 +45,16 @@ LOCATION_OPTIONS = [
     "Drawer B1", "Drawer B2", "Shelf 1", "Shelf 2", "Shelf 3", "Bench", "Field Kit"
 ]
 
-app = FastAPI(title="Visual Inventory")
+app = FastAPI(title="Electronics Inventory")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    session_cookie=SESSION_COOKIE_NAME,
+    same_site="lax",
+    https_only=False,
+    max_age=60 * 60 * 24 * 14,
+)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "app" / "static")), name="static")
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
 
 
@@ -222,8 +237,6 @@ def serialize_duplicate_rows(rows) -> list[dict]:
     ]
 
 
-
-
 def split_location(location: str) -> tuple[str, str]:
     location = normalize_text(location)
     if " / " in location:
@@ -248,6 +261,7 @@ def refresh_item_identity(conn: sqlite3.Connection, item_id: int) -> None:
         (structured_name, qr_path, qr_payload, item_id),
     )
 
+
 def make_form_state(
     category: str = "Electronics",
     item_type: str = "Resistor",
@@ -270,6 +284,68 @@ def make_form_state(
     }
 
 
+# --- auth helpers ---
+def hash_password(password: str, salt: Optional[str] = None, iterations: int = 260000) -> str:
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
+    return f"pbkdf2_sha256${iterations}${salt}${digest.hex()}"
+
+
+def verify_password(password: str) -> bool:
+    if ADMIN_PASSWORD_HASH:
+        try:
+            algo, iter_text, salt, expected = ADMIN_PASSWORD_HASH.split("$", 3)
+            if algo != "pbkdf2_sha256":
+                return False
+            computed = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                salt.encode("utf-8"),
+                int(iter_text),
+            ).hex()
+            return hmac.compare_digest(computed, expected)
+        except Exception:
+            return False
+    if ADMIN_PASSWORD:
+        return hmac.compare_digest(password, ADMIN_PASSWORD)
+    return False
+
+
+def get_current_user(request: Request) -> Optional[str]:
+    user = request.session.get("user")
+    return user if user == ADMIN_USERNAME else None
+
+
+def next_value(request: Request) -> str:
+    return request.url.path + (f"?{request.url.query}" if request.url.query else "")
+
+
+def require_login(request: Request, api: bool = False):
+    if get_current_user(request):
+        return None
+    if api:
+        return JSONResponse({"detail": "Authentication required."}, status_code=401)
+    return RedirectResponse(url=f"/login?next={quote(next_value(request), safe='/?:=&')}", status_code=303)
+
+
+def local_path_from_db_path(db_path: str) -> Path:
+    relative = db_path.replace("/uploads/", "", 1).lstrip("/")
+    return UPLOAD_DIR / relative
+
+
+def media_url(db_path: Optional[str]) -> Optional[str]:
+    if not db_path:
+        return None
+    relative = db_path.replace("/uploads/", "", 1).lstrip("/")
+    return f"/media/{relative}"
+
+
+def context(request: Request, **kwargs):
+    data = {"request": request, "current_user": get_current_user(request), "media_url": media_url}
+    data.update(kwargs)
+    return data
+
+
 @app.on_event("startup")
 def startup() -> None:
     init_db()
@@ -280,8 +356,50 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/"):
+    if get_current_user(request):
+        return RedirectResponse(url=next or "/", status_code=303)
+    return templates.TemplateResponse("login.html", context(request, next=next, error=""))
+
+
+@app.post("/login", response_class=HTMLResponse)
+def login_submit(request: Request, username: str = Form(...), password: str = Form(...), next: str = Form("/")):
+    if hmac.compare_digest(username, ADMIN_USERNAME) and verify_password(password):
+        request.session["user"] = ADMIN_USERNAME
+        return RedirectResponse(url=next or "/", status_code=303)
+    return templates.TemplateResponse(
+        "login.html",
+        context(request, next=next, error="Invalid username or password."),
+        status_code=401,
+    )
+
+
+@app.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=303)
+
+
+@app.get("/media/{file_path:path}")
+def protected_media(request: Request, file_path: str):
+    auth = require_login(request)
+    if auth:
+        return auth
+    normalized = Path(file_path)
+    target = (UPLOAD_DIR / normalized).resolve()
+    if UPLOAD_DIR.resolve() not in target.parents and target != UPLOAD_DIR.resolve():
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    return FileResponse(target)
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, q: str = ""):
+    auth = require_login(request)
+    if auth:
+        return auth
     with get_conn() as conn:
         if q.strip():
             like = f"%{q.strip()}%"
@@ -303,26 +421,30 @@ def home(request: Request, q: str = ""):
             rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC, id DESC").fetchall()
     return templates.TemplateResponse(
         "index.html",
-        {
-            "request": request,
-            "items": rows,
-            "q": q,
-            "category_options": CATEGORY_OPTIONS,
-            "type_options": TYPE_OPTIONS,
-            "location_options": LOCATION_OPTIONS,
-            "form_data": make_form_state(),
-            "duplicate_candidates": [],
-            "duplicate_message": "",
-        },
+        context(
+            request,
+            items=rows,
+            q=q,
+            category_options=CATEGORY_OPTIONS,
+            type_options=TYPE_OPTIONS,
+            location_options=LOCATION_OPTIONS,
+            form_data=make_form_state(),
+            duplicate_candidates=[],
+            duplicate_message="",
+        ),
     )
 
 
 @app.get("/api/duplicate-check")
 def duplicate_check(
+    request: Request,
     category: str = Query(...),
     item_type: str = Query(...),
     value_model: str = Query(""),
 ):
+    auth = require_login(request, api=True)
+    if auth:
+        return auth
     category = canonical_category(category)
     item_type = canonical_type(item_type)
     value_model = normalize_value_model(value_model)
@@ -335,6 +457,9 @@ def duplicate_check(
 
 @app.get("/items/{item_id}", response_class=HTMLResponse)
 def item_detail(request: Request, item_id: int, updated: int = 0):
+    auth = require_login(request)
+    if auth:
+        return auth
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
         if not row:
@@ -342,16 +467,16 @@ def item_detail(request: Request, item_id: int, updated: int = 0):
     primary_location, location_detail = split_location(row["location"] or "")
     return templates.TemplateResponse(
         "item_detail.html",
-        {
-            "request": request,
-            "item": row,
-            "category_options": CATEGORY_OPTIONS,
-            "type_options": TYPE_OPTIONS,
-            "location_options": LOCATION_OPTIONS,
-            "primary_location": primary_location,
-            "location_detail": location_detail,
-            "updated": updated,
-        },
+        context(
+            request,
+            item=row,
+            category_options=CATEGORY_OPTIONS,
+            type_options=TYPE_OPTIONS,
+            location_options=LOCATION_OPTIONS,
+            primary_location=primary_location,
+            location_detail=location_detail,
+            updated=updated,
+        ),
     )
 
 
@@ -369,6 +494,9 @@ async def create_item(
     confirm_duplicate: int = Form(0),
     photo: Optional[UploadFile] = File(None),
 ):
+    auth = require_login(request)
+    if auth:
+        return auth
     if quantity < 1:
         raise HTTPException(status_code=400, detail="Quantity must be at least 1.")
 
@@ -399,17 +527,17 @@ async def create_item(
             rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC, id DESC").fetchall()
             return templates.TemplateResponse(
                 "index.html",
-                {
-                    "request": request,
-                    "items": rows,
-                    "q": "",
-                    "category_options": CATEGORY_OPTIONS,
-                    "type_options": TYPE_OPTIONS,
-                    "location_options": LOCATION_OPTIONS,
-                    "form_data": make_form_state(category, item_type, value_model, location.split(" / ")[0], location.split(" / ", 1)[1] if " / " in location else "", quantity, tags, notes),
-                    "duplicate_candidates": duplicates,
-                    "duplicate_message": f"Found {len(duplicates)} possible duplicate(s). Re-select the photo if you still want to save this new item.",
-                },
+                context(
+                    request,
+                    items=rows,
+                    q="",
+                    category_options=CATEGORY_OPTIONS,
+                    type_options=TYPE_OPTIONS,
+                    location_options=LOCATION_OPTIONS,
+                    form_data=make_form_state(category, item_type, value_model, location.split(" / ")[0], location.split(" / ", 1)[1] if " / " in location else "", quantity, tags, notes),
+                    duplicate_candidates=duplicates,
+                    duplicate_message=f"Found {len(duplicates)} possible duplicate(s). Re-select the photo if you still want to save this new item.",
+                ),
                 status_code=409,
             )
 
@@ -436,6 +564,7 @@ async def create_item(
 
 @app.post("/items/{item_id}/update")
 async def update_item(
+    request: Request,
     item_id: int,
     category: str = Form(...),
     item_type: str = Form(...),
@@ -447,6 +576,9 @@ async def update_item(
     notes: str = Form(""),
     photo: Optional[UploadFile] = File(None),
 ):
+    auth = require_login(request)
+    if auth:
+        return auth
     if quantity < 1:
         raise HTTPException(status_code=400, detail="Quantity must be at least 1.")
 
@@ -469,8 +601,7 @@ async def update_item(
             image_path = new_image_path
             if old_image_path:
                 try:
-                    relative = old_image_path.replace("/uploads/", "")
-                    local_path = UPLOAD_DIR / relative
+                    local_path = local_path_from_db_path(old_image_path)
                     if local_path.exists():
                         local_path.unlink()
                 except OSError:
@@ -491,7 +622,10 @@ async def update_item(
 
 
 @app.post("/items/{item_id}/add-quantity")
-def add_quantity(item_id: int, amount: int = Form(...)):
+def add_quantity(request: Request, item_id: int, amount: int = Form(...)):
+    auth = require_login(request)
+    if auth:
+        return auth
     if amount < 1:
         raise HTTPException(status_code=400, detail="Added quantity must be at least 1.")
 
@@ -508,7 +642,10 @@ def add_quantity(item_id: int, amount: int = Form(...)):
 
 
 @app.post("/items/{item_id}/delete")
-def delete_item(item_id: int):
+def delete_item(request: Request, item_id: int):
+    auth = require_login(request)
+    if auth:
+        return auth
     with get_conn() as conn:
         row = conn.execute("SELECT image_path, qr_path FROM items WHERE id = ?", (item_id,)).fetchone()
         if not row:
@@ -520,8 +657,7 @@ def delete_item(item_id: int):
         if not path:
             continue
         try:
-            relative = path.replace("/uploads/", "")
-            local_path = UPLOAD_DIR / relative
+            local_path = local_path_from_db_path(path)
             if local_path.exists():
                 local_path.unlink()
         except OSError:
@@ -532,6 +668,9 @@ def delete_item(item_id: int):
 
 @app.get("/labels", response_class=HTMLResponse)
 def labels_page(request: Request, q: str = Query("")):
+    auth = require_login(request)
+    if auth:
+        return auth
     with get_conn() as conn:
         if q.strip():
             like = f"%{q.strip()}%"
@@ -545,4 +684,4 @@ def labels_page(request: Request, q: str = Query("")):
             ).fetchall()
         else:
             rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC, id DESC").fetchall()
-    return templates.TemplateResponse("labels.html", {"request": request, "items": rows, "q": q})
+    return templates.TemplateResponse("labels.html", context(request, items=rows, q=q))

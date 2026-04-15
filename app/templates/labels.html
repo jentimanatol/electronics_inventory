@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -20,13 +19,14 @@
           <button type="submit">Filter</button>
         </form>
         <button onclick="window.print()">Print this page</button>
+        <form action="/logout" method="post"><button class="secondary" type="submit">Log out</button></form>
       </div>
     </section>
 
     <section class="labels-grid">
       {% for item in items %}
       <article class="label-card">
-        <img class="label-qr" src="{{ item['qr_path'] }}" alt="QR code for {{ item['structured_name'] }}" />
+        <img class="label-qr" src="{{ media_url(item['qr_path']) }}" alt="QR code for {{ item['structured_name'] }}" />
         <div class="label-text">
           <strong>{{ item['structured_name'] }}</strong>
           <span>{{ item['item_type'] }}{% if item['value_model'] %} • {{ item['value_model'] }}{% endif %}</span>

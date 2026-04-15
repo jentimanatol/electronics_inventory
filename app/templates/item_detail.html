@@ -14,9 +14,10 @@
         <p>Single item view for scanning, checking, printing, and editing.</p>
       </div>
       <div class="hero-actions">
-        <a class="button-link" href="{{ item['qr_path'] }}" download="{{ item['structured_name'] }}_QR.png">Download QR</a>
+        <a class="button-link" href="{{ media_url(item['qr_path']) }}" download="{{ item['structured_name'] }}_QR.png">Download QR</a>
         <button onclick="window.print()">Print</button>
         <a class="button-link secondary" href="/">Back to inventory</a>
+        <form action="/logout" method="post"><button class="secondary" type="submit">Log out</button></form>
       </div>
     </section>
 
@@ -30,7 +31,7 @@
     <section class="card item-detail-grid">
       <div>
         {% if item['image_path'] %}
-          <img class="detail-image" src="{{ item['image_path'] }}" alt="{{ item['structured_name'] }}" />
+          <img class="detail-image" src="{{ media_url(item['image_path']) }}" alt="{{ item['structured_name'] }}" />
         {% else %}
           <div class="placeholder detail-image">No photo</div>
         {% endif %}
@@ -45,7 +46,7 @@
         <p><strong>Notes:</strong> {{ item['notes'] or '-' }}</p>
         <p><strong>ID:</strong> {{ item['id'] }}</p>
         {% if item['qr_path'] %}
-          <img class="qr-large" src="{{ item['qr_path'] }}" alt="QR code" />
+          <img class="qr-large" src="{{ media_url(item['qr_path']) }}" alt="QR code" />
         {% endif %}
       </div>
     </section>

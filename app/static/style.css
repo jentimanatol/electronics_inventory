@@ -156,3 +156,6 @@ button.danger { background: var(--danger); color: white; }
 .inline-form { display:flex; gap:0.75rem; align-items:end; flex-wrap:wrap; }
 .compact-form label { margin:0; }
 .compact-form input { width: 7rem; }
+
+.login-wrap { min-height: 100vh; display:flex; align-items:center; justify-content:center; }
+.login-card { width:min(480px, 94vw); }

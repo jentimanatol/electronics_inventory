@@ -11,10 +11,11 @@
     <section class="hero">
       <div>
         <h1>Electronics Inventory</h1>
-        <p>Structured entries, QR labels, and printable inventory tags.</p>
+        <p>Private single-user inventory with QR labels, duplicate protection, and editable stock records.</p>
       </div>
       <div class="hero-actions">
         <a class="button-link" href="/labels" target="_blank">Print QR labels</a>
+        <form action="/logout" method="post"><button class="secondary" type="submit">Log out</button></form>
       </div>
     </section>
 
@@ -89,7 +90,7 @@
         {% for item in items %}
         <article class="item-card">
           {% if item['image_path'] %}
-            <img src="{{ item['image_path'] }}" alt="{{ item['structured_name'] }}" />
+            <img src="{{ media_url(item['image_path']) }}" alt="{{ item['structured_name'] }}" />
           {% else %}
             <div class="placeholder">No photo</div>
           {% endif %}
@@ -104,9 +105,9 @@
             <p><strong>Notes:</strong> {{ item['notes'] or '-' }}</p>
             {% if item['qr_path'] %}
             <div class="qr-row">
-              <img class="qr-thumb" src="{{ item['qr_path'] }}" alt="QR code for {{ item['structured_name'] }}" />
+              <img class="qr-thumb" src="{{ media_url(item['qr_path']) }}" alt="QR code for {{ item['structured_name'] }}" />
               <div class="qr-actions">
-                <a class="button-link small" href="{{ item['qr_path'] }}" download="{{ item['structured_name'] }}_QR.png">Download QR</a>
+                <a class="button-link small" href="{{ media_url(item['qr_path']) }}" download="{{ item['structured_name'] }}_QR.png">Download QR</a>
                 <a class="button-link small secondary" href="/items/{{ item['id'] }}" target="_blank">Open item</a>
               </div>
             </div>
@@ -177,6 +178,10 @@
       url.searchParams.set('value_model', valueModel);
       try {
         const response = await fetch(url.toString(), {headers: {'Accept': 'application/json'}});
+        if (response.status === 401) {
+          window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+          return [];
+        }
         const data = await response.json();
         const duplicates = data.duplicates || [];
         renderDuplicateWarning(duplicates);
