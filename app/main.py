@@ -526,6 +526,14 @@ async def scan_page(request: Request):
     return render(request, "scan.html")
 
 
+
+@app.get("/admin/backup", response_class=HTMLResponse)
+async def backup_page(request: Request):
+    return render(request, "backup.html")
+
+
+
+
 @app.get("/api/items/{item_id}")
 async def api_item(item_id: int):
     item = get_item(item_id)

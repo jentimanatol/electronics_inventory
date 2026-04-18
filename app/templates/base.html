@@ -13,21 +13,22 @@
     </div>
 
     {% if logged_in %}
+    
+
     <nav class="nav">
-      <a href="/">Home</a>
-      <a href="/labels">Labels</a>
-      <a href="/scan">Scan QR</a>
-      <a href="/backup">Backup</a>
+  <a href="/">Home</a>
+  <a href="/labels">Labels</a>
+  <a href="/scan">Scan QR</a>
+  <a href="/backup">Backup</a>
+  <a href="/admin/backup">Restore</a>
 
-      <form method="post" action="/restore" enctype="multipart/form-data" class="inline-form">
-        <input type="file" name="file" accept=".db" required>
-        <button type="submit">Restore</button>
-      </form>
+  <form method="post" action="/logout" class="inline-form">
+    <button type="submit">Logout</button>
+  </form>
+</nav>
 
-      <form method="post" action="/logout" class="inline-form">
-        <button type="submit">Logout</button>
-      </form>
-    </nav>
+
+
     {% endif %}
   </header>
 

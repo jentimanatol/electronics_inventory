@@ -59,3 +59,36 @@ button.danger { background:#b23a3a; margin-top:12px; }
 .label-title { font-weight:700; font-size:14px; }
 .label-sub { font-size:12px; margin:4px 0 8px; }
 hr { border:0; border-top:1px solid var(--line); margin:16px 0; }
+
+
+
+
+
+.card.narrow {
+  max-width: 500px;
+  margin: 40px auto;
+}
+
+.section {
+  margin-bottom: 20px;
+}
+
+.section.danger {
+  border: 1px solid #ff4d4d;
+  padding: 15px;
+  border-radius: 8px;
+}
+
+button.danger {
+  background-color: #ff4d4d;
+  color: white;
+}
+
+a.button {
+  display: inline-block;
+  padding: 8px 12px;
+  background: #4da3ff;
+  color: white;
+  border-radius: 6px;
+  text-decoration: none;
+}
