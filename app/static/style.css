@@ -92,3 +92,88 @@ a.button {
   border-radius: 6px;
   text-decoration: none;
 }
+
+
+
+
+
+
+
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #11151b;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+}
+
+.brand a {
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  font-size: 1.1rem;
+}
+
+.menu-toggle {
+  display: none;
+  background: #1b6fd6;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.nav {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.inline-form {
+  display: inline;
+}
+
+@media (max-width: 768px) {
+  .menu-toggle {
+    display: block;
+  }
+
+  .nav {
+    display: none;
+    position: absolute;
+    top: 60px;
+    right: 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    background: #171b22;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+    min-width: 180px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  .nav.show {
+    display: flex;
+  }
+
+  .nav a,
+  .nav button {
+    width: 100%;
+    text-align: left;
+  }
+
+  .brand a {
+    font-size: 1rem;
+    line-height: 1.2;
+  }
+}
