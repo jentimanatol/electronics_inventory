@@ -1,48 +1,142 @@
 {% extends "base.html" %}
+
 {% block content %}
-<div class="card">
+<div class="card narrow">
   <h1>Scan QR</h1>
-  <p class="muted">Use your phone camera or paste a scanned item URL.</p>
+  <p class="muted">Use your camera, paste an item URL, or upload a photo containing a QR code.</p>
 
-  <div class="btnrow">
+  <div class="section">
+    <h2>Camera Scanner</h2>
     <button type="button" onclick="startScanner()">Start camera scanner</button>
+    <div id="reader" style="max-width: 420px; margin-top: 12px;"></div>
+    <p id="camera-status" class="muted"></p>
   </div>
-
-  <div id="reader" style="max-width:420px;margin-top:12px;"></div>
 
   <hr>
 
-  <form class="form" onsubmit="openScanned(event)">
-    <label>Paste scanned URL
-      <input type="text" id="manualUrl" placeholder="https://.../items/123">
-    </label>
-    <button type="submit">Open</button>
-  </form>
+  <div class="section">
+    <h2>Paste Scanned URL</h2>
+    <form class="form" onsubmit="openScanned(event)">
+      <label>Scanned item URL
+        <input type="text" id="manualUrl" placeholder="https://.../items/123">
+      </label>
+      <button type="submit">Open</button>
+    </form>
+  </div>
+
+  <hr>
+
+  <div class="section">
+    <h2>Upload QR Image</h2>
+    <p class="muted">Select a photo or screenshot containing a QR code.</p>
+
+    <input type="file" id="qr-file" accept="image/*">
+    <div class="btnrow" style="margin-top: 10px;">
+      <button type="button" onclick="scanFromImage()">Scan Image</button>
+    </div>
+
+    <p id="upload-status" class="muted" style="margin-top: 10px;"></p>
+  </div>
 </div>
 
 <script src="https://unpkg.com/html5-qrcode"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+
 <script>
-let scanner;
-function openScanned(ev){
-  ev.preventDefault();
-  const url = document.getElementById('manualUrl').value.trim();
-  if(url) window.location.href = url;
+let scannerInstance = null;
+
+function openScanned(event) {
+  event.preventDefault();
+  const url = document.getElementById("manualUrl").value.trim();
+
+  if (!url) {
+    alert("Please paste a URL first.");
+    return;
+  }
+
+  handleQRResult(url);
 }
-function startScanner(){
-  const reader = document.getElementById("reader");
-  scanner = new Html5Qrcode("reader");
-  scanner.start(
+
+function handleQRResult(data) {
+  console.log("QR result:", data);
+
+  if (data.includes("/items/")) {
+    window.location.href = data;
+  } else {
+    document.getElementById("manualUrl").value = data;
+    alert("QR decoded, but it is not a direct item URL. Review the pasted value.");
+  }
+}
+
+function startScanner() {
+  const status = document.getElementById("camera-status");
+  status.textContent = "Starting camera scanner...";
+
+  if (scannerInstance) {
+    status.textContent = "Scanner is already running.";
+    return;
+  }
+
+  scannerInstance = new Html5Qrcode("reader");
+
+  scannerInstance.start(
     { facingMode: "environment" },
     { fps: 10, qrbox: 250 },
     (decodedText) => {
-      scanner.stop().then(() => {
-        window.location.href = decodedText;
+      status.textContent = "QR detected.";
+      scannerInstance.stop().then(() => {
+        scannerInstance = null;
+        handleQRResult(decodedText);
       });
     },
     () => {}
-  ).catch(() => {
-    reader.innerHTML = "<p>Camera scanner could not start. Use the manual field below.</p>";
+  ).catch((err) => {
+    console.error(err);
+    status.textContent = "Camera scanner could not start. You can still paste a URL or upload an image.";
   });
+}
+
+async function scanFromImage() {
+  const fileInput = document.getElementById("qr-file");
+  const status = document.getElementById("upload-status");
+  const file = fileInput.files[0];
+
+  if (!file) {
+    alert("Please select an image first.");
+    return;
+  }
+
+  status.textContent = "Reading image...";
+
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+
+  img.onload = function () {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imageData.data, canvas.width, canvas.height);
+
+    if (code) {
+      status.textContent = "QR found in image.";
+      handleQRResult(code.data);
+    } else {
+      status.textContent = "No QR code found in the selected image.";
+      alert("No QR code found in image.");
+    }
+
+    fileInput.value = "";
+  };
+
+  img.onerror = function () {
+    status.textContent = "Could not read the selected image.";
+    alert("Could not read the selected image.");
+  };
 }
 </script>
 {% endblock %}
