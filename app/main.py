@@ -369,6 +369,17 @@ async def item_detail(request: Request, item_id: int):
     return render(request, "item.html", item=item, duplicates=duplicates)
 
 
+
+@app.get("/backup")
+async def backup():
+    return FileResponse(
+        DB_PATH,
+        media_type="application/octet-stream",
+        filename="inventory_backup.db",
+    )
+
+
+
 @app.post("/items/{item_id}/edit")
 async def edit_item(
     item_id: int,
