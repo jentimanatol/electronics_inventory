@@ -17,8 +17,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "change-me")
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-not-for-production")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin1")
+SECRET_KEY = os.getenv("SECRET_KEY", "admiin_secret")
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 DB_PATH = Path(os.getenv("DB_PATH", str(UPLOAD_DIR / "inventory.db")))
@@ -232,7 +232,7 @@ async def login(
         key=AUTH_COOKIE_NAME,
         value=make_auth_cookie(),
         httponly=True,
-        secure=False,      # set True later when everything works
+        secure=True,      # set True later when everything works
         samesite="lax",
         max_age=60 * 60 * 24 * 30,
         path="/",
