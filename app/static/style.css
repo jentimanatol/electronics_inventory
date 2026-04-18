@@ -177,3 +177,14 @@ a.button {
     line-height: 1.2;
   }
 }
+
+
+
+
+@media (max-width: 768px) {
+  .brand a {
+    font-size: 0.95rem;
+    max-width: 140px;
+    display: inline-block;
+  }
+}
