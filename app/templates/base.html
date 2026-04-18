@@ -13,27 +13,31 @@
     </div>
 
     {% if logged_in %}
-    
+    <button class="menu-toggle" onclick="toggleMenu()">☰</button>
 
-    <nav class="nav">
-  <a href="/">Home</a>
-  <a href="/labels">Labels</a>
-  <a href="/scan">Scan QR</a>
-  <a href="/backup">Backup</a>
-  <a href="/admin/backup">Restore</a>
+    <nav class="nav" id="mobileNav">
+      <a href="/">Home</a>
+      <a href="/labels">Labels</a>
+      <a href="/scan">Scan QR</a>
+      <a href="/backup">Backup</a>
+      <a href="/admin/backup">Restore</a>
 
-  <form method="post" action="/logout" class="inline-form">
-    <button type="submit">Logout</button>
-  </form>
-</nav>
-
-
-
+      <form method="post" action="/logout" class="inline-form">
+        <button type="submit">Logout</button>
+      </form>
+    </nav>
     {% endif %}
   </header>
 
   <main class="wrap">
     {% block content %}{% endblock %}
   </main>
+
+  <script>
+    function toggleMenu() {
+      const nav = document.getElementById("mobileNav");
+      nav.classList.toggle("show");
+    }
+  </script>
 </body>
 </html>
