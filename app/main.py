@@ -5,14 +5,15 @@ import shutil
 import sqlite3
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import qrcode
+from itsdangerous import URLSafeSerializer, BadSignature
 from fastapi import FastAPI, Form, Request, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from starlette.middleware.sessions import SessionMiddleware
+
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
@@ -28,15 +29,6 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Electronics Inventory")
-
-# Session middleware must exist before request.session is accessed anywhere.
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=SECRET_KEY,
-    https_only=False,
-    same_site="lax",
-)
-
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 env = Environment(
@@ -44,6 +36,8 @@ env = Environment(
     autoescape=select_autoescape(["html", "xml"]),
 )
 
+serializer = URLSafeSerializer(SECRET_KEY, salt="electronics-inventory-auth")
+AUTH_COOKIE_NAME = "inventory_auth"
 PUBLIC_PATHS = {"/login", "/health"}
 
 
@@ -82,6 +76,21 @@ def init_db():
 init_db()
 
 
+def is_logged_in(request: Request) -> bool:
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    if not token:
+        return False
+    try:
+        data = serializer.loads(token)
+        return data.get("username") == ADMIN_USERNAME
+    except BadSignature:
+        return False
+
+
+def make_auth_cookie() -> str:
+    return serializer.dumps({"username": ADMIN_USERNAME})
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
@@ -89,7 +98,7 @@ async def auth_middleware(request: Request, call_next):
     if path in PUBLIC_PATHS or path.startswith("/static"):
         return await call_next(request)
 
-    if request.session.get("authenticated") is True:
+    if is_logged_in(request):
         return await call_next(request)
 
     next_path = quote(path)
@@ -101,21 +110,21 @@ def render(request: Request, template_name: str, **context):
     base_context = {
         "request": request,
         "app_base_url": APP_BASE_URL,
-        "logged_in": request.session.get("authenticated", False),
+        "logged_in": is_logged_in(request),
     }
     base_context.update(context)
     return HTMLResponse(template.render(**base_context))
 
 
 def slugify(text: str) -> str:
-    text = (text or "").strip().upper()
+    text = text.strip().upper()
     text = re.sub(r"[^A-Z0-9]+", "_", text)
     text = re.sub(r"_+", "_", text).strip("_")
     return text or "NA"
 
 
 def normalize_value(item_type: str, value: str) -> str:
-    s = (value or "").strip().lower().replace(" ", "")
+    s = value.strip().lower().replace(" ", "")
     if not s:
         return ""
 
@@ -124,7 +133,7 @@ def normalize_value(item_type: str, value: str) -> str:
         if m:
             num = float(m.group(1))
             suffix = m.group(2)
-            mult = {"": 1, "r": 1, "k": 1_000, "m": 1_000_000}.get(suffix, 1)
+            mult = {"": 1, "r": 1, "k": 1000, "m": 1000000}.get(suffix, 1)
             return f"{int(num * mult)}OHM"
 
     if item_type.lower() == "capacitor":
@@ -139,15 +148,13 @@ def normalize_value(item_type: str, value: str) -> str:
 
 
 def build_structured_name(category: str, item_type: str, value_model: str, location: str, quantity: int) -> str:
-    return "_".join(
-        [
-            slugify(category),
-            slugify(item_type),
-            slugify(value_model),
-            slugify(location),
-            f"{quantity}PCS",
-        ]
-    )
+    return "_".join([
+        slugify(category),
+        slugify(item_type),
+        slugify(value_model),
+        slugify(location),
+        f"{quantity}PCS",
+    ])
 
 
 def save_upload(file: UploadFile) -> str:
@@ -198,12 +205,6 @@ def find_duplicates(category: str, item_type: str, normalized_value: str, exclud
     return rows
 
 
-TYPE_OPTIONS = [
-    "Resistor", "Capacitor", "Inductor", "Diode", "Transistor", "IC",
-    "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply", "Tool", "Other"
-]
-
-
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -211,7 +212,7 @@ async def health():
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, next: str = "/"):
-    if request.session.get("authenticated"):
+    if is_logged_in(request):
         return RedirectResponse(url=next or "/", status_code=303)
     return render(request, "login.html", next=next)
 
@@ -223,16 +224,27 @@ async def login(
     password: str = Form(...),
     next: str = Form("/"),
 ):
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-        request.session["authenticated"] = True
-        return RedirectResponse(url=next or "/", status_code=303)
-    return render(request, "login.html", next=next, error="Invalid credentials.")
+    if username != ADMIN_USERNAME or password != ADMIN_PASSWORD:
+        return render(request, "login.html", error="Invalid credentials.", next=next)
+
+    response = RedirectResponse(url=unquote(next) if next else "/", status_code=303)
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=make_auth_cookie(),
+        httponly=True,
+        secure=False,      # set True later when everything works
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+        path="/",
+    )
+    return response
 
 
 @app.post("/logout")
-async def logout(request: Request):
-    request.session.clear()
-    return RedirectResponse(url="/login", status_code=303)
+async def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -262,7 +274,11 @@ async def home(request: Request, q: str = ""):
         "index.html",
         items=items,
         q=q,
-        type_options=TYPE_OPTIONS,
+        category_options=["Electronics"],
+        type_options=[
+            "Resistor", "Capacitor", "Inductor", "Diode", "Transistor", "IC",
+            "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply", "Tool", "Other"
+        ],
     )
 
 
@@ -291,7 +307,6 @@ async def create_item(
             "index.html",
             items=items,
             q="",
-            type_options=TYPE_OPTIONS,
             duplicate_warning=True,
             duplicate_items=duplicates,
             pending_form={
@@ -303,6 +318,11 @@ async def create_item(
                 "tags": tags,
                 "notes": notes,
             },
+            category_options=["Electronics"],
+            type_options=[
+                "Resistor", "Capacitor", "Inductor", "Diode", "Transistor", "IC",
+                "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply", "Tool", "Other"
+            ],
         )
 
     structured_name = build_structured_name(category, item_type, value_model, location, quantity)
@@ -318,16 +338,8 @@ async def create_item(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            category,
-            item_type,
-            value_model,
-            normalized_value,
-            quantity,
-            location,
-            tags,
-            notes,
-            structured_name,
-            photo_filename,
+            category, item_type, value_model, normalized_value,
+            quantity, location, tags, notes, structured_name, photo_filename
         ),
     )
     item_id = cur.lastrowid
@@ -354,7 +366,7 @@ async def item_detail(request: Request, item_id: int):
         item["normalized_value"],
         exclude_id=item_id,
     )
-    return render(request, "item.html", item=item, duplicates=duplicates, type_options=TYPE_OPTIONS)
+    return render(request, "item.html", item=item, duplicates=duplicates)
 
 
 @app.post("/items/{item_id}/edit")
@@ -390,17 +402,9 @@ async def edit_item(
         WHERE id=?
         """,
         (
-            category,
-            item_type,
-            value_model,
-            normalized_value,
-            quantity,
-            location,
-            tags,
-            notes,
-            structured_name,
-            photo_filename,
-            item_id,
+            category, item_type, value_model, normalized_value,
+            quantity, location, tags, notes, structured_name,
+            photo_filename, item_id
         ),
     )
     qr_filename = create_qr(item_id)
@@ -419,7 +423,11 @@ async def adjust_quantity(item_id: int, delta: int = Form(...)):
 
     new_qty = max(0, int(item["quantity"]) + int(delta))
     structured_name = build_structured_name(
-        item["category"], item["item_type"], item["value_model"], item["location"], new_qty
+        item["category"],
+        item["item_type"],
+        item["value_model"],
+        item["location"],
+        new_qty,
     )
 
     conn = db()
@@ -429,17 +437,20 @@ async def adjust_quantity(item_id: int, delta: int = Form(...)):
     )
     conn.commit()
     conn.close()
+
     return RedirectResponse(url=f"/items/{item_id}", status_code=303)
 
 
 @app.post("/items/{item_id}/delete")
 async def delete_item(item_id: int):
     item = get_item(item_id)
-    if item:
-        conn = db()
-        conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
-        conn.commit()
-        conn.close()
+    if not item:
+        return RedirectResponse(url="/", status_code=303)
+
+    conn = db()
+    conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
+    conn.commit()
+    conn.close()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -474,3 +485,11 @@ async def labels_page(request: Request):
 @app.get("/scan", response_class=HTMLResponse)
 async def scan_page(request: Request):
     return render(request, "scan.html")
+
+
+@app.get("/api/items/{item_id}")
+async def api_item(item_id: int):
+    item = get_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Not found")
+    return dict(item)
