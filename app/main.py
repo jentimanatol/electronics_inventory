@@ -14,6 +14,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from fastapi import UploadFile, File
+import tempfile
+import shutil
+
+
+
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
@@ -377,6 +383,28 @@ async def backup():
         media_type="application/octet-stream",
         filename="inventory_backup.db",
     )
+
+
+@app.post("/restore")
+async def restore_db(file: UploadFile = File(...)):
+    if not file.filename.endswith(".db"):
+        return {"error": "Only .db files allowed"}
+
+    backup_path = DB_PATH.with_suffix(".backup.db")
+    shutil.copy(DB_PATH, backup_path)
+
+    try:
+        with open(DB_PATH, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception:
+        shutil.copy(backup_path, DB_PATH)
+        return {"error": "Restore failed, rollback applied"}
+
+    return RedirectResponse(url="/", status_code=303)
+
+
+
+
 
 
 

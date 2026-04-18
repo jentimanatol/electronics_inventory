@@ -1,28 +1,38 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title or "Electronics Inventory" }}</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header class="topbar">
-  <div class="brand"><a href="/">Electronics Inventory</a></div>
-  {% if logged_in %}
-  <nav class="nav">
-    <a href="/">Home</a>
-    <a href="/labels">Labels</a>
-    <a href="/scan">Scan QR</a>
-    <a href="/backup">Backup</a>
-    <form method="post" action="/logout" class="inline-form">
-      <button type="submit">Logout</button>
-    </form>
-  </nav>
-  {% endif %}
-</header>
-<main class="wrap">
-  {% block content %}{% endblock %}
-</main>
+  <header class="topbar">
+    <div class="brand">
+      <a href="/">Electronics Inventory</a>
+    </div>
+
+    {% if logged_in %}
+    <nav class="nav">
+      <a href="/">Home</a>
+      <a href="/labels">Labels</a>
+      <a href="/scan">Scan QR</a>
+      <a href="/backup">Backup</a>
+
+      <form method="post" action="/restore" enctype="multipart/form-data" class="inline-form">
+        <input type="file" name="file" accept=".db" required>
+        <button type="submit">Restore</button>
+      </form>
+
+      <form method="post" action="/logout" class="inline-form">
+        <button type="submit">Logout</button>
+      </form>
+    </nav>
+    {% endif %}
+  </header>
+
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
 </body>
 </html>
