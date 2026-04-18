@@ -48,7 +48,72 @@
       </form>
     </div>
 
-    <form method="post" action="/items/{{ item['id'] }}/edit" enctype="multipart/form-data" class="form">
+
+<form method="post" action="/items/{{ item['id'] }}/edit" enctype="multipart/form-data" class="form">
+  <label>Category
+    <input type="text" name="category" value="{{ item['category'] }}" required>
+  </label>
+
+  <label>Type
+    <select name="item_type" required>
+      <option value="Resistor" {% if item['item_type'] == 'Resistor' %}selected{% endif %}>Resistor</option>
+      <option value="Capacitor" {% if item['item_type'] == 'Capacitor' %}selected{% endif %}>Capacitor</option>
+      <option value="Inductor" {% if item['item_type'] == 'Inductor' %}selected{% endif %}>Inductor</option>
+      <option value="Diode" {% if item['item_type'] == 'Diode' %}selected{% endif %}>Diode</option>
+      <option value="Transistor" {% if item['item_type'] == 'Transistor' %}selected{% endif %}>Transistor</option>
+      <option value="IC" {% if item['item_type'] == 'IC' %}selected{% endif %}>IC</option>
+      <option value="Module" {% if item['item_type'] == 'Module' %}selected{% endif %}>Module</option>
+      <option value="Sensor" {% if item['item_type'] == 'Sensor' %}selected{% endif %}>Sensor</option>
+      <option value="Board" {% if item['item_type'] == 'Board' %}selected{% endif %}>Board</option>
+      <option value="Cable" {% if item['item_type'] == 'Cable' %}selected{% endif %}>Cable</option>
+      <option value="Connector" {% if item['item_type'] == 'Connector' %}selected{% endif %}>Connector</option>
+      <option value="Power Supply" {% if item['item_type'] == 'Power Supply' %}selected{% endif %}>Power Supply</option>
+      <option value="Tool" {% if item['item_type'] == 'Tool' %}selected{% endif %}>Tool</option>
+      <option value="Other" {% if item['item_type'] == 'Other' %}selected{% endif %}>Other</option>
+    </select>
+  </label>
+
+  <label>Value / Model
+    <input type="text" name="value_model" value="{{ item['value_model'] }}" required>
+  </label>
+
+  <label>Quantity
+    <input type="number" min="0" name="quantity" value="{{ item['quantity'] }}" required>
+  </label>
+
+  <label>Location
+    <input type="text" name="location" value="{{ item['location'] }}" required>
+  </label>
+
+  <label>Tags
+    <input type="text" name="tags" value="{{ item['tags'] }}">
+  </label>
+
+  <label>Notes
+    <textarea name="notes" rows="4">{{ item['notes'] }}</textarea>
+  </label>
+
+  <label>Replace photo
+    <input type="file" name="photo" accept="image/*">
+  </label>
+
+  <button type="submit">Save changes</button>
+</form>
+
+
+    <form method="post" action="/items/{{ item['id'] }}/delete" class="inline-form" onsubmit="return confirm('Delete this item?')">
+      <button class="danger" type="submit">Delete item</button>
+    </form>
+  
+
+
+
+  </section>
+</div> 
+{% endblock %}
+
+
+    <!-- <form method="post" action="/items/{{ item['id'] }}/edit" enctype="multipart/form-data" class="form">
       <label>Category
         <input type="text" name="category" value="{{ item['category'] }}" required>
       </label>
@@ -84,5 +149,4 @@
       <button class="danger" type="submit">Delete item</button>
     </form>
   </section>
-</div>
-{% endblock %}
+</div> -->
