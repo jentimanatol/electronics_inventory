@@ -1,194 +1,83 @@
 {% extends "base.html" %}
-
-{% block site_header %}{% endblock %}
-{% block main_class %} home-wrap{% endblock %}
-
 {% block content %}
-{% set totals = namespace(quantity=0, photos=0) %}
-{% for item in items %}
-  {% set totals.quantity = totals.quantity + (item['quantity'] or 0) %}
-  {% if item['photo_filename'] %}
-    {% set totals.photos = totals.photos + 1 %}
-  {% endif %}
-{% endfor %}
+<div class="grid2">
+  <section class="card">
+    <h2>Add electronics item</h2>
 
-<div class="home-shell">
-  <section class="card home-page-menu">
-    <div class="home-page-menu-copy">
-      <!-- Home page keeps its own menu and does not use the global top bar. -->
-      <div class="panel-kicker">Desktop inventory dashboard</div>
-      <h1>Electronics Inventory</h1>
-    </div>
-
-    <div class="home-page-actions">
-      <a class="page-menu-btn active" href="/">Home</a>
-      <a class="page-menu-btn" href="/labels">Labels</a>
-      <a class="page-menu-btn" href="/scan">Scan QR</a>
-      <a class="page-menu-btn" href="/backup">Backup</a>
-      <a class="page-menu-btn" href="/admin/backup">Restore</a>
-      <form method="post" action="/logout" class="inline-form">
-        <button type="submit" class="page-menu-btn page-menu-logout">Logout</button>
-      </form>
-    </div>
-  </section>
-
-  <section class="card desktop-hero desktop-hero-simple">
-    <div class="hero-copy">
-      <!-- Keep descriptive notes out of user view. -->
-      <div class="hero-inline-meta">
-        <span class="hero-meta-pill">{{ items|length }} visible item{% if items|length != 1 %}s{% endif %}</span>
-        <span class="hero-meta-pill">{{ totals.quantity }} total unit{% if totals.quantity != 1 %}s{% endif %}</span>
-        <span class="hero-meta-pill">{{ totals.photos }} photo{% if totals.photos != 1 %}s{% endif %}</span>
-        <span class="hero-meta-pill">{% if q %}Filtered by “{{ q }}”{% else %}Full inventory view{% endif %}</span>
-      </div>
-    </div>
-
-    <div class="hero-stats-grid">
-      <div class="hero-stat-card">
-        <span class="hero-stat-label">Items</span>
-        <strong>{{ items|length }}</strong>
-        <span class="hero-stat-foot">records visible now</span>
-      </div>
-      <div class="hero-stat-card">
-        <span class="hero-stat-label">Quantity</span>
-        <strong>{{ totals.quantity }}</strong>
-        <span class="hero-stat-foot">total units in view</span>
-      </div>
-      <div class="hero-stat-card">
-        <span class="hero-stat-label">Photos</span>
-        <strong>{{ totals.photos }}</strong>
-        <span class="hero-stat-foot">items with images</span>
-      </div>
-      <div class="hero-stat-card">
-        <span class="hero-stat-label">Mode</span>
-        <strong>{% if q %}Search{% else %}All{% endif %}</strong>
-        <span class="hero-stat-foot">{% if q %}filtered inventory view{% else %}full inventory view{% endif %}</span>
-      </div>
-    </div>
-  </section>
-
-  <div class="desktop-home-grid">
-    <section class="card add-panel">
-      <div class="panel-head">
-        <div>
-          <div class="panel-kicker">Quick entry</div>
-          <h2>Add electronics item</h2>
-        </div>
-        <div class="panel-badge">QR auto-generated</div>
-      </div>
-
-      {% if duplicate_warning %}
-      <div class="alert warn">
-        <strong>Possible duplicates found.</strong>
-        <ul>
-          {% for d in duplicate_items %}
-          <li><a href="/items/{{ d['id'] }}">{{ d['structured_name'] }}</a> — Qty {{ d['quantity'] }} — {{ d['location'] }}</li>
-          {% endfor %}
-        </ul>
-        <p>Open the existing item and update it there, or save this one anyway.</p>
-      </div>
-      {% endif %}
-
-      <form method="post" action="/items" enctype="multipart/form-data" class="form desktop-form-grid">
-        <input type="hidden" name="confirm_duplicate" value="{% if duplicate_warning %}1{% else %}0{% endif %}">
-
-        <label>Category
-          <input type="text" name="category" value="{{ pending_form.category if pending_form else 'Electronics' }}" required>
-        </label>
-
-        <label>Type
-          <select name="item_type" required>
-            {% for t in type_options %}
-            <option value="{{ t }}" {% if pending_form and pending_form.item_type == t %}selected{% endif %}>{{ t }}</option>
-            {% endfor %}
-          </select>
-        </label>
-
-        <label class="span-2">Value / Model
-          <input type="text" name="value_model" value="{{ pending_form.value_model if pending_form else '' }}" required>
-        </label>
-
-        <label>Quantity
-          <input type="number" name="quantity" min="0" value="{{ pending_form.quantity if pending_form else 1 }}" required>
-        </label>
-
-        <label>Location
-          <input type="text" name="location" value="{{ pending_form.location if pending_form else '' }}" placeholder="Box 1 / Drawer A2" required>
-        </label>
-
-        <label class="span-2">Tags
-          <input type="text" name="tags" value="{{ pending_form.tags if pending_form else '' }}" placeholder="sensor, power, smd, test board">
-        </label>
-
-        <label class="span-2">Notes
-          <textarea name="notes" rows="4">{{ pending_form.notes if pending_form else '' }}</textarea>
-        </label>
-
-        <label class="span-2">Photo
-          <input type="file" name="photo" accept="image/*">
-        </label>
-
-        <div class="span-2 form-actions-row">
-          <button type="submit">{% if duplicate_warning %}Save anyway{% else %}Save item + generate QR{% endif %}</button>
-        </div>
-      </form>
-    </section>
-
-    <section class="card browse-panel">
-      <div class="panel-head browse-head">
-        <div>
-          <div class="panel-kicker">Browse inventory</div>
-          <h2>Search and recent items</h2>
-        </div>
-
-        <form method="get" action="/" class="searchbar-wide">
-          <input type="text" name="q" value="{{ q or '' }}" placeholder="Search model, location, note, tag...">
-          <button type="submit">Search</button>
-        </form>
-      </div>
-
-      {% if q %}
-      <div class="search-status">
-        Showing {{ items|length }} result{% if items|length != 1 %}s{% endif %} for <strong>{{ q }}</strong>.
-        <a href="/">Clear search</a>
-      </div>
-      {% endif %}
-
-      <div class="desktop-items-grid">
-        {% for item in items %}
-        <article class="desktop-item-card">
-          <div class="desktop-item-top">
-            <div>
-              <div class="item-type-pill">{{ item['item_type'] }}</div>
-              <a class="title" href="/items/{{ item['id'] }}">{{ item['structured_name'] }}</a>
-            </div>
-            <div class="qty-badge">Qty {{ item['quantity'] }}</div>
-          </div>
-
-          <div class="desktop-item-meta">
-            <div><span>Category</span><strong>{{ item['category'] }}</strong></div>
-            <div><span>Model</span><strong>{{ item['value_model'] }}</strong></div>
-            <div><span>Location</span><strong>{{ item['location'] }}</strong></div>
-            <div><span>Tags</span><strong>{{ item['tags'] or '—' }}</strong></div>
-          </div>
-
-          <div class="desktop-item-bottom">
-            <a class="buttonlike secondary-btn small-btn" href="/items/{{ item['id'] }}">Open details</a>
-            {% if item['photo_filename'] %}
-            <img class="thumb thumb-large" src="/media/{{ item['photo_filename'] }}" alt="{{ item['structured_name'] }} photo">
-            {% else %}
-            <div class="thumb thumb-placeholder">No photo</div>
-            {% endif %}
-          </div>
-        </article>
-        {% else %}
-        <div class="empty-desktop-state">
-          <h3>No items yet</h3>
-          <p>Add the first component on the left to start building the inventory.</p>
-        </div>
+    {% if duplicate_warning %}
+    <div class="alert warn">
+      <strong>Possible duplicates found.</strong>
+      <ul>
+        {% for d in duplicate_items %}
+        <li><a href="/items/{{ d['id'] }}">{{ d['structured_name'] }}</a> — Qty {{ d['quantity'] }} — {{ d['location'] }}</li>
         {% endfor %}
-      </div>
-    </section>
-  </div>
+      </ul>
+      <p>You can open the existing item and edit quantity/details there, or save anyway below.</p>
+    </div>
+    {% endif %}
+
+    <form method="post" action="/items" enctype="multipart/form-data" class="form">
+      <input type="hidden" name="confirm_duplicate" value="{% if duplicate_warning %}1{% else %}0{% endif %}">
+      <label>Category
+        <input type="text" name="category" value="{{ pending_form.category if pending_form else 'Electronics' }}" required>
+      </label>
+      <label>Type
+        <select name="item_type" required>
+          {% for t in type_options %}
+          <option value="{{ t }}" {% if pending_form and pending_form.item_type == t %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Value / Model
+        <input type="text" name="value_model" value="{{ pending_form.value_model if pending_form else '' }}" required>
+      </label>
+      <label>Quantity
+        <input type="number" name="quantity" min="0" value="{{ pending_form.quantity if pending_form else 1 }}" required>
+      </label>
+      <label>Location
+        <input type="text" name="location" value="{{ pending_form.location if pending_form else '' }}" placeholder="Box 1 / Drawer A2" required>
+      </label>
+      <label>Tags
+        <input type="text" name="tags" value="{{ pending_form.tags if pending_form else '' }}">
+      </label>
+      <label>Notes
+        <textarea name="notes" rows="3">{{ pending_form.notes if pending_form else '' }}</textarea>
+      </label>
+      <label>Photo
+        <input type="file" name="photo" accept="image/*">
+      </label>
+      <button type="submit">{% if duplicate_warning %}Save anyway{% else %}Save item + generate QR{% endif %}</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="row between">
+      <h2>Search inventory</h2>
+      <form method="get" action="/" class="inline-form search-form">
+        <input type="text" name="q" value="{{ q or '' }}" placeholder="10k, Arduino, Drawer A2">
+        <button type="submit">Search</button>
+      </form>
+    </div>
+
+    <div class="items">
+      {% for item in items %}
+      <article class="item">
+        <div class="item-meta">
+          <a class="title" href="/items/{{ item['id'] }}">{{ item['structured_name'] }}</a>
+          <div class="muted">Category: {{ item['category'] }}</div>
+          <div class="muted">Type: {{ item['item_type'] }}</div>
+          <div class="muted">Value/Model: {{ item['value_model'] }}</div>
+          <div class="muted">Location: {{ item['location'] }}</div>
+          <div class="muted">Qty: {{ item['quantity'] }}</div>
+        </div>
+        {% if item['photo_filename'] %}
+        <img class="thumb" src="/media/{{ item['photo_filename'] }}" alt="">
+        {% endif %}
+      </article>
+      {% else %}
+      <p class="muted">No items yet.</p>
+      {% endfor %}
+    </div>
+  </section>
 </div>
 {% endblock %}
