@@ -10,17 +10,14 @@
 
 <div class="home-shell">
   <section class="card desktop-hero">
+    <!-- Desktop hero: keep this section clean and informational only. -->
     <div class="hero-copy">
       <div class="hero-kicker">Desktop inventory dashboard</div>
       <h1>Electronics Inventory</h1>
-      <p class="hero-text">
-        Cleaner desktop layout for faster adding, searching, and opening items without touching the backend logic.
-      </p>
-
-      <div class="hero-links">
-        <a class="buttonlike secondary-btn" href="/labels">Print labels</a>
-        <a class="buttonlike secondary-btn" href="/scan">Scan QR</a>
-        <a class="buttonlike secondary-btn" href="/admin/backup">Backup tools</a>
+      <div class="hero-inline-meta">
+        <span class="hero-meta-pill">{{ items|length }} visible item{% if items|length != 1 %}s{% endif %}</span>
+        <span class="hero-meta-pill">{% if q %}Filtered view{% else %}Full inventory view{% endif %}</span>
+        <span class="hero-meta-pill">{{ totals.photos }} photo{% if totals.photos != 1 %}s{% endif %} linked</span>
       </div>
     </div>
 
