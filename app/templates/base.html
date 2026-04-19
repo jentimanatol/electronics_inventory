@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+  {% block site_header %}
   <header class="topbar">
     <div class="brand">
       <a href="/">Electronics Inventory</a>
@@ -28,15 +29,18 @@
     </nav>
     {% endif %}
   </header>
+  {% endblock %}
 
-  <main class="wrap">
+  <main class="wrap{% block main_class %}{% endblock %}">
     {% block content %}{% endblock %}
   </main>
 
   <script>
     function toggleMenu() {
       const nav = document.getElementById("mobileNav");
-      nav.classList.toggle("show");
+      if (nav) {
+        nav.classList.toggle("show");
+      }
     }
   </script>
 </body>

@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+
+{% block site_header %}{% endblock %}
+{% block main_class %} home-wrap{% endblock %}
+
 {% block content %}
 {% set totals = namespace(quantity=0, photos=0) %}
 {% for item in items %}
@@ -9,9 +13,9 @@
 {% endfor %}
 
 <div class="home-shell">
-  <!-- Home page navigation is intentionally placed inside the page instead of the global top bar. -->
   <section class="card home-page-menu">
     <div class="home-page-menu-copy">
+      <!-- Home page keeps its own menu and does not use the global top bar. -->
       <div class="panel-kicker">Desktop inventory dashboard</div>
       <h1>Electronics Inventory</h1>
     </div>
@@ -30,10 +34,11 @@
 
   <section class="card desktop-hero desktop-hero-simple">
     <div class="hero-copy">
+      <!-- Keep descriptive notes out of user view. -->
       <div class="hero-inline-meta">
         <span class="hero-meta-pill">{{ items|length }} visible item{% if items|length != 1 %}s{% endif %}</span>
         <span class="hero-meta-pill">{{ totals.quantity }} total unit{% if totals.quantity != 1 %}s{% endif %}</span>
-        <span class="hero-meta-pill">{{ totals.photos }} photo{% if totals.photos != 1 %}s{% endif %} linked</span>
+        <span class="hero-meta-pill">{{ totals.photos }} photo{% if totals.photos != 1 %}s{% endif %}</span>
         <span class="hero-meta-pill">{% if q %}Filtered by “{{ q }}”{% else %}Full inventory view{% endif %}</span>
       </div>
     </div>
