@@ -5,23 +5,15 @@
     <section class="card home-page-menu desktop-hero-simple">
       <div class="home-page-menu-copy">
         <div class="hero-kicker">Desktop workspace</div>
-        <h1>Organize parts faster without touching the backend.</h1>
+        <h1>Cleaner front page, same backend.</h1>
         <p class="muted">
-          Cleaner desktop layout for adding items, searching inventory, and opening details with less visual clutter.
+          The navigation already lives in the top bar, so this page stays focused on adding items, searching inventory, and opening saved parts.
         </p>
         <div class="hero-inline-meta">
           <span class="hero-meta-pill">{{ items|length }} item{% if items|length != 1 %}s{% endif %} visible</span>
           <span class="hero-meta-pill">{% if q %}Filtered view: “{{ q }}”{% else %}Full inventory view{% endif %}</span>
-          <span class="hero-meta-pill">QR page generated for each saved item</span>
+          <span class="hero-meta-pill">Desktop layout only — phone layout unchanged</span>
         </div>
-      </div>
-
-      <div class="home-page-actions">
-        <a class="page-menu-btn active" href="/">Inventory</a>
-        <a class="page-menu-btn" href="/labels">Labels</a>
-        <a class="page-menu-btn" href="/scan">Scan QR</a>
-        <a class="page-menu-btn" href="/backup">Backup</a>
-        <a class="page-menu-btn" href="/admin/backup">Restore</a>
       </div>
     </section>
 

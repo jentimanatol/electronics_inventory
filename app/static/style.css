@@ -11,7 +11,7 @@
 * { box-sizing:border-box; }
 body {
   margin:0;
-  font-family:Arial,Helvetica,sans-serif;
+  font-family:"Segoe UI",Inter,"Helvetica Neue",Arial,sans-serif;
   background:
     radial-gradient(circle at top right, rgba(44,123,229,0.12), transparent 24%),
     radial-gradient(circle at top left, rgba(86,170,255,0.07), transparent 20%),
@@ -143,60 +143,89 @@ hr { border:0; border-top:1px solid var(--line); margin:16px 0; }
 
 /* Home page desktop refresh */
 
+
+@media (min-width: 769px) {
+  .topbar {
+    padding: 18px 28px;
+    background:
+      linear-gradient(180deg, rgba(9, 14, 22, 0.98), rgba(11, 17, 25, 0.94)),
+      radial-gradient(circle at right top, rgba(44,123,229,0.16), transparent 26%);
+  }
+
+  .brand a {
+    font-size: 1.22rem;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  .nav {
+    gap: 8px;
+  }
+
+  .nav a,
+  .nav .inline-form button {
+    min-height: 48px;
+    padding: 0 18px;
+    border-radius: 18px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #bdd8ff;
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+  }
+
+  .nav a:hover,
+  .nav .inline-form button:hover {
+    text-decoration: none;
+    background: rgba(255,255,255,0.05);
+    border-color: rgba(120, 165, 255, 0.14);
+    color: #ecf5ff;
+    transform: translateY(-1px);
+  }
+
+  .nav .inline-form button {
+    background: linear-gradient(180deg, #3d8fff, #2a6ed2);
+    border-color: rgba(120, 173, 255, 0.28);
+    box-shadow: 0 14px 30px rgba(26, 88, 181, 0.22);
+  }
+
+  .nav .inline-form button:hover {
+    background: linear-gradient(180deg, #5ca2ff, #3279df);
+  }
+
+  .home-page-menu {
+    padding: 24px 26px;
+  }
+
+  .home-page-menu-copy h1,
+  .desktop-hero h1,
+  .panel-head h2,
+  .browse-panel h2,
+  .card h2,
+  .empty-desktop-state h3 {
+    letter-spacing: -0.03em;
+  }
+}
+
 .home-wrap { padding-top: 16px; }
 
 .home-page-menu {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:18px;
+  display:block;
   padding:16px 18px;
 }
 .home-page-menu-copy h1 {
   margin:4px 0 0;
-  font-size:2rem;
-  line-height:1.08;
+  font-size:2.15rem;
+  line-height:1.04;
+  max-width:760px;
 }
-.home-page-actions {
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-  align-items:center;
-  justify-content:flex-end;
+.home-page-menu-copy .muted {
+  max-width: 820px;
 }
-.page-menu-btn {
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  min-height:42px;
-  padding:10px 14px;
-  border-radius:12px;
-  background:rgba(255,255,255,0.04);
-  border:1px solid rgba(255,255,255,0.08);
-  color:var(--text);
-  font-weight:600;
-  text-decoration:none;
-}
-.page-menu-btn:hover {
-  text-decoration:none;
-  background:rgba(255,255,255,0.08);
-}
-.page-menu-btn.active {
-  background:rgba(44,123,229,0.14);
-  border-color:rgba(88,159,255,0.28);
-  color:#dcecff;
-}
-.page-menu-logout {
-  background:linear-gradient(180deg, #3186f2, #266bc0);
-  border:none;
-}
-.page-menu-logout:hover { filter:brightness(1.06); }
 .desktop-hero-simple {
-  grid-template-columns:minmax(280px, 0.9fr) minmax(460px, 1.1fr);
   align-items:center;
-}
-.desktop-hero-simple .hero-copy {
-  justify-content:flex-start;
 }
 .home-shell { display:grid; gap:18px; }
 .desktop-hero {
