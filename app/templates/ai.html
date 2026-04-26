@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card ai-hero">
+  <div>
+    <div class="panel-kicker">Local AI feature</div>
+    <h1>Inventory AI Assistant</h1>
+    <p class="muted">
+      Ask about parts, locations, project kits, duplicate groups, or low-stock warnings.
+      The answer is generated only from your SQLite inventory data.
+    </p>
+  </div>
+  <div class="ai-badges">
+    <span>RAG-style retrieval</span>
+    <span>No paid API needed</span>
+    <span>Private by design</span>
+  </div>
+</section>
+
+<section class="card">
+  <form method="get" action="/ai" class="ai-question-form">
+    <label>Ask a question about your inventory
+      <input
+        type="text"
+        name="q"
+        value="{{ q or '' }}"
+        placeholder="Example: What Arduino sensor parts do I have for a smart garden project?"
+        autofocus>
+    </label>
+    <button type="submit">Ask AI</button>
+  </form>
+
+  <div class="ai-examples">
+    <a href="/ai?q=What%20should%20I%20restock%3F">Restock warning</a>
+    <a href="/ai?q=Find%20Arduino%20sensor%20parts%20for%20a%20smart%20garden%20project">Smart garden kit</a>
+    <a href="/ai?q=Do%20I%20have%20duplicate%20capacitors%3F">Duplicate check</a>
+    <a href="/ai?q=Find%20stepper%20motor%20driver%20parts">Stepper driver search</a>
+  </div>
+</section>
+
+<section class="grid2">
+  <div class="card">
+    <h2>AI answer</h2>
+    <div class="ai-mode">Mode: {{ result.mode }}</div>
+    <pre class="ai-answer">{{ result.answer }}</pre>
+  </div>
+
+  <div class="card">
+    <h2>Inventory diagnostics</h2>
+    <div class="ai-stats-grid">
+      <div class="ai-stat">
+        <strong>{{ result.stats.unique_items }}</strong>
+        <span>unique item records</span>
+      </div>
+      <div class="ai-stat">
+        <strong>{{ result.stats.total_quantity }}</strong>
+        <span>total quantity</span>
+      </div>
+      <div class="ai-stat">
+        <strong>{{ result.stats.low_stock|length }}</strong>
+        <span>low-stock warnings</span>
+      </div>
+      <div class="ai-stat">
+        <strong>{{ result.stats.duplicate_groups|length }}</strong>
+        <span>duplicate groups</span>
+      </div>
+    </div>
+
+    <h3>Top categories/types</h3>
+    <div class="ai-chip-row">
+      {% for t, count in result.stats.top_types %}
+      <span class="ai-chip">{{ t }} × {{ count }}</span>
+      {% else %}
+      <span class="muted">No items yet.</span>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+{% if result.retrieved %}
+<section class="card">
+  <h2>Retrieved evidence</h2>
+  <p class="muted">These are the database rows used as context for the answer.</p>
+
+  <div class="items">
+    {% for r in result.retrieved %}
+    {% set item = r.item %}
+    <article class="item ai-evidence-item">
+      <div class="item-meta">
+        <a class="title" href="/items/{{ item['id'] }}">#{{ item['id'] }} {{ item['structured_name'] }}</a>
+        <div class="muted">Type: {{ item['item_type'] }} | Value/Model: {{ item['value_model'] }}</div>
+        <div class="muted">Location: {{ item['location'] }} | Qty: {{ item['quantity'] }} | Relevance: {{ r.score }}</div>
+        {% if item['tags'] %}<div class="muted">Tags: {{ item['tags'] }}</div>{% endif %}
+        {% if item['notes'] %}<div class="muted">Notes: {{ item['notes'] }}</div>{% endif %}
+      </div>
+      {% if item['photo_filename'] %}
+      <img class="thumb" src="/media/{{ item['photo_filename'] }}" alt="">
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}
