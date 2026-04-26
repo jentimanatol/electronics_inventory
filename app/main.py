@@ -3,6 +3,8 @@ import re
 import secrets
 import shutil
 import sqlite3
+import math
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, unquote
@@ -211,6 +213,182 @@ def find_duplicates(category: str, item_type: str, normalized_value: str, exclud
     return rows
 
 
+# -------------------------
+# Local AI / RAG assistant
+# -------------------------
+# Dependency-free so it works on Railway without a GPU or paid API key.
+# Workflow: database rows -> text documents -> TF-IDF/cosine retrieval ->
+# grounded inventory recommendations and diagnostics.
+
+AI_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "do", "for", "from",
+    "have", "i", "in", "is", "it", "me", "my", "of", "on", "or", "the",
+    "to", "we", "what", "where", "which", "with", "you", "need", "find",
+    "show", "give", "list", "all", "any", "inventory", "item", "items",
+}
+
+AI_SYNONYMS = {
+    "arduino": {"uno", "mega", "nano", "giga", "microcontroller", "board", "mcu"},
+    "raspberry": {"pi", "linux", "sbc", "computer"},
+    "sensor": {"dht", "bme", "moisture", "hall", "imu", "temperature", "humidity"},
+    "motor": {"stepper", "driver", "a4988", "drv8825", "coil", "winder"},
+    "power": {"supply", "buck", "boost", "converter", "lm2596", "battery"},
+    "wire": {"cable", "connector", "dupont", "jumper", "trrs", "jack"},
+    "ai": {"assistant", "recommend", "smart", "rag", "search"},
+    "restock": {"low", "missing", "shortage", "quantity", "qty", "buy"},
+}
+
+
+def tokenize_ai(text: str):
+    words = re.findall(r"[a-zA-Z0-9]+", (text or "").lower())
+    tokens = [w for w in words if len(w) > 1 and w not in AI_STOPWORDS]
+    expanded = list(tokens)
+    for token in tokens:
+        expanded.extend(AI_SYNONYMS.get(token, set()))
+    return expanded
+
+
+def item_document(item) -> str:
+    return " ".join([
+        str(item["structured_name"]),
+        str(item["category"]),
+        str(item["item_type"]),
+        str(item["value_model"]),
+        str(item["normalized_value"]),
+        str(item["location"]),
+        str(item["tags"] or ""),
+        str(item["notes"] or ""),
+    ])
+
+
+def load_items():
+    conn = db()
+    rows = conn.execute("SELECT * FROM items ORDER BY updated_at DESC, id DESC").fetchall()
+    conn.close()
+    return rows
+
+
+def retrieve_ai_items(question: str, items, limit: int = 8):
+    q_terms = Counter(tokenize_ai(question))
+    if not q_terms:
+        return []
+
+    docs = [Counter(tokenize_ai(item_document(item))) for item in items]
+    if not docs:
+        return []
+
+    df = defaultdict(int)
+    for doc in docs:
+        for term in doc:
+            df[term] += 1
+
+    n = len(docs)
+    ranked = []
+    for item, doc in zip(items, docs):
+        dot = 0.0
+        q_norm = 0.0
+        d_norm = 0.0
+        for term, q_count in q_terms.items():
+            idf = math.log((n + 1) / (df.get(term, 0) + 1)) + 1
+            q_weight = q_count * idf
+            d_weight = doc.get(term, 0) * idf
+            dot += q_weight * d_weight
+            q_norm += q_weight * q_weight
+        for term, d_count in doc.items():
+            idf = math.log((n + 1) / (df.get(term, 0) + 1)) + 1
+            d_norm += (d_count * idf) ** 2
+        score = dot / ((math.sqrt(q_norm) * math.sqrt(d_norm)) or 1.0)
+        if score > 0:
+            ranked.append({"item": item, "score": round(score, 3)})
+
+    return sorted(ranked, key=lambda r: r["score"], reverse=True)[:limit]
+
+
+def inventory_ai_stats(items):
+    total_quantity = sum(int(item["quantity"] or 0) for item in items)
+    by_type = Counter(item["item_type"] for item in items)
+    low_stock = [item for item in items if int(item["quantity"] or 0) <= 2]
+
+    duplicate_groups = defaultdict(list)
+    for item in items:
+        key = (item["category"], item["item_type"], item["normalized_value"])
+        duplicate_groups[key].append(item)
+    duplicate_groups = [group for group in duplicate_groups.values() if len(group) > 1]
+
+    return {
+        "unique_items": len(items),
+        "total_quantity": total_quantity,
+        "top_types": by_type.most_common(6),
+        "low_stock": low_stock[:10],
+        "duplicate_groups": duplicate_groups[:8],
+    }
+
+
+def generate_ai_answer(question: str, items):
+    question_clean = (question or "").strip()
+    stats = inventory_ai_stats(items)
+    retrieved = retrieve_ai_items(question_clean, items)
+    q_lower = question_clean.lower()
+
+    if not items:
+        return {
+            "answer": "Your inventory is empty, so the assistant cannot make grounded recommendations yet. Add a few items first, then ask for project parts, shortages, or duplicate checks.",
+            "retrieved": [],
+            "stats": stats,
+            "mode": "empty-inventory",
+        }
+
+    if not question_clean:
+        return {
+            "answer": "Ask me something like: 'What Arduino parts do I have?', 'What should I restock?', 'Find sensors for a smart garden project', or 'Do I have duplicate capacitors?'.",
+            "retrieved": [],
+            "stats": stats,
+            "mode": "help",
+        }
+
+    answer_parts = []
+    mode = "semantic-rag"
+
+    if any(word in q_lower for word in ["restock", "low", "shortage", "buy", "missing", "quantity", "qty"]):
+        mode = "stock-diagnostic"
+        if stats["low_stock"]:
+            answer_parts.append("Main warning: these parts have low quantity and should be checked before the next build:")
+            for item in stats["low_stock"][:6]:
+                answer_parts.append(f"- {item['value_model']} ({item['item_type']}) — qty {item['quantity']} — {item['location']}")
+        else:
+            answer_parts.append("I do not see low-stock items with quantity 2 or less.")
+
+    if any(word in q_lower for word in ["duplicate", "same", "repeated"]):
+        mode = "duplicate-diagnostic"
+        if stats["duplicate_groups"]:
+            answer_parts.append("Possible duplicate groups found:")
+            for group in stats["duplicate_groups"][:5]:
+                names = "; ".join([f"#{g['id']} {g['value_model']} qty {g['quantity']}" for g in group])
+                answer_parts.append(f"- {group[0]['item_type']} {group[0]['normalized_value']}: {names}")
+        else:
+            answer_parts.append("No strong duplicate groups were found using category + type + normalized value.")
+
+    if retrieved:
+        if not answer_parts:
+            answer_parts.append("Best matching inventory items based on your question:")
+        for r in retrieved[:5]:
+            item = r["item"]
+            answer_parts.append(
+                f"- #{item['id']} {item['value_model']} ({item['item_type']}) — qty {item['quantity']} — {item['location']} — relevance {r['score']}"
+            )
+        if any(word in q_lower for word in ["project", "build", "kit", "arduino", "sensor", "motor", "coil", "garden"]):
+            answer_parts.append("Project suggestion: open the top matching items, verify quantity, then print QR labels for the physical boxes before starting the build.")
+    elif not answer_parts:
+        answer_parts.append("I could not find a strong match. Try a component name, model number, project keyword, location, or tag such as 'Arduino', 'sensor', 'A4988', 'capacitor', or 'Drawer A2'.")
+
+    return {
+        "answer": "\n".join(answer_parts),
+        "retrieved": retrieved,
+        "stats": stats,
+        "mode": mode,
+    }
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -286,6 +464,13 @@ async def home(request: Request, q: str = ""):
             "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply", "Tool", "Other"
         ],
     )
+
+
+@app.get("/ai", response_class=HTMLResponse)
+async def ai_page(request: Request, q: str = ""):
+    items = load_items()
+    result = generate_ai_answer(q, items)
+    return render(request, "ai.html", q=q, result=result, items=items)
 
 
 @app.post("/items")
