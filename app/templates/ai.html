@@ -11,6 +11,7 @@
   </div>
   <div class="ai-badges">
     <span>RAG-style retrieval</span>
+    <span>Transformer decoder prototype included</span>
     <span>No paid API needed</span>
     <span>Private by design</span>
   </div>
@@ -42,6 +43,7 @@
     <h2>AI answer</h2>
     <div class="ai-mode">Mode: {{ result.mode }}</div>
     <pre class="ai-answer">{{ result.answer }}</pre>
+    <p class="muted small-note">Optional class component: <code>app/ai_transformer_decoder.py</code> contains a tiny GPT-style decoder-only Transformer for offline training on inventory text. The production page still uses fast private RAG so Railway stays stable.</p>
   </div>
 
   <div class="card">
