@@ -236,12 +236,22 @@ AI_SYNONYMS = {
     "wire": {"cable", "connector", "dupont", "jumper", "trrs", "jack"},
     "ai": {"assistant", "recommend", "smart", "rag", "search"},
     "restock": {"low", "missing", "shortage", "quantity", "qty", "buy"},
+    "capacitor": {"cap", "caps", "ceramic", "electrolytic", "uf", "nf", "pf"},
+    "resistor": {"ohm", "kohm", "mohm", "resistance"},
+    "module": {"board", "breakout", "shield"},
 }
 
 
 def tokenize_ai(text: str):
     words = re.findall(r"[a-zA-Z0-9]+", (text or "").lower())
-    tokens = [w for w in words if len(w) > 1 and w not in AI_STOPWORDS]
+    tokens = []
+    for w in words:
+        if len(w) <= 1 or w in AI_STOPWORDS:
+            continue
+        tokens.append(w)
+        # Tiny singular/plural normalization: capacitors -> capacitor, sensors -> sensor.
+        if len(w) > 3 and w.endswith("s"):
+            tokens.append(w[:-1])
     expanded = list(tokens)
     for token in tokens:
         expanded.extend(AI_SYNONYMS.get(token, set()))
@@ -304,6 +314,29 @@ def retrieve_ai_items(question: str, items, limit: int = 8):
     return sorted(ranked, key=lambda r: r["score"], reverse=True)[:limit]
 
 
+def direct_type_matches(question: str, items):
+    """Return exact item-type/model matches for questions like 'do I have capacitors?'."""
+    q_tokens = set(tokenize_ai(question))
+    matches = []
+    for item in items:
+        item_type_tokens = set(tokenize_ai(str(item["item_type"])))
+        value_tokens = set(tokenize_ai(str(item["value_model"])))
+        tag_tokens = set(tokenize_ai(str(item["tags"] or "")))
+        if q_tokens & (item_type_tokens | value_tokens | tag_tokens):
+            matches.append({"item": item, "score": 1.0})
+    return matches[:8]
+
+
+def question_targets_known_type(question: str):
+    q_tokens = set(tokenize_ai(question))
+    known = {
+        "capacitor", "resistor", "inductor", "diode", "transistor", "sensor",
+        "module", "board", "cable", "connector", "power", "tool", "motor",
+        "arduino", "raspberry", "a4988", "drv8825",
+    }
+    return sorted(q_tokens & known)
+
+
 def inventory_ai_stats(items):
     total_quantity = sum(int(item["quantity"] or 0) for item in items)
     by_type = Counter(item["item_type"] for item in items)
@@ -328,6 +361,12 @@ def generate_ai_answer(question: str, items):
     question_clean = (question or "").strip()
     stats = inventory_ai_stats(items)
     retrieved = retrieve_ai_items(question_clean, items)
+    # Add an exact type/model pass so simple questions like
+    # "do I have capacitors?" still work even with a very small database.
+    direct_matches = direct_type_matches(question_clean, items)
+    seen_ids = {r["item"]["id"] for r in retrieved}
+    retrieved.extend([r for r in direct_matches if r["item"]["id"] not in seen_ids])
+    retrieved = retrieved[:8]
     q_lower = question_clean.lower()
 
     if not items:
@@ -379,7 +418,16 @@ def generate_ai_answer(question: str, items):
         if any(word in q_lower for word in ["project", "build", "kit", "arduino", "sensor", "motor", "coil", "garden"]):
             answer_parts.append("Project suggestion: open the top matching items, verify quantity, then print QR labels for the physical boxes before starting the build.")
     elif not answer_parts:
-        answer_parts.append("I could not find a strong match. Try a component name, model number, project keyword, location, or tag such as 'Arduino', 'sensor', 'A4988', 'capacitor', or 'Drawer A2'.")
+        targets = question_targets_known_type(question_clean)
+        if targets and any(phrase in q_lower for phrase in ["do i have", "have", "in store", "in stock"]):
+            current_types = ", ".join([f"{t} × {c}" for t, c in stats["top_types"]]) or "none"
+            answer_parts.append(
+                f"I do not see a matching record for: {', '.join(targets)}. "
+                f"Current top inventory types are: {current_types}. "
+                "If the part exists physically, add it with that component name in Type, Value/Model, Tags, or Notes so AI search can find it."
+            )
+        else:
+            answer_parts.append("I could not find a strong match. Try a component name, model number, project keyword, location, or tag such as 'Arduino', 'sensor', 'A4988', 'capacitor', or 'Drawer A2'.")
 
     return {
         "answer": "\n".join(answer_parts),
