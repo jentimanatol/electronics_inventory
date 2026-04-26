@@ -1,0 +1,3 @@
+# Optional dependencies for the offline transformer-decoder experiment.
+# Do not install these on Railway unless you intentionally want server-side training.
+torch
