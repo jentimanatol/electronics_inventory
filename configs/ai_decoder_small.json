@@ -1,0 +1,22 @@
+{
+  "seed": 42,
+  "model_family": "decoder-only Transformer",
+  "task": "next-token prediction over inventory text",
+  "block_size": 128,
+  "n_embd": 96,
+  "n_head": 4,
+  "n_layer": 2,
+  "dropout": 0.1,
+  "batch_size": 32,
+  "learning_rate": 0.0003,
+  "epochs": 10,
+  "decoding": {
+    "greedy": true,
+    "beam_width": 3,
+    "temperature": 0.8,
+    "top_k": 5,
+    "top_p": 0.9,
+    "repetition_penalty": 1.15
+  },
+  "compute_plan": "CPU-friendly offline prototype; production Railway app uses dependency-free RAG."
+}
