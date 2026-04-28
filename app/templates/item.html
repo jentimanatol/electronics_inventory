@@ -8,6 +8,8 @@
     <div class="muted">Value/Model: {{ item['value_model'] }}</div>
     <div class="muted">Location: {{ item['location'] }}</div>
     <div class="muted">Quantity: {{ item['quantity'] }}</div>
+    <div class="muted">Unit price: ${{ '%.2f'|format(item['price'] or 0) }}</div>
+    <div class="muted">Total value: ${{ '%.2f'|format((item['price'] or 0) * (item['quantity'] or 0)) }}</div>
     <div class="muted">Tags: {{ item['tags'] or '-' }}</div>
     <div class="muted">Notes: {{ item['notes'] or '-' }}</div>
 
@@ -79,6 +81,10 @@
 
   <label>Quantity
     <input type="number" min="0" name="quantity" value="{{ item['quantity'] }}" required>
+  </label>
+
+  <label>Unit price ($)
+    <input type="number" min="0" step="0.01" name="price" value="{{ item['price'] or 0 }}">
   </label>
 
   <label>Location

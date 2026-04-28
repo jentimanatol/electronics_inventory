@@ -41,7 +41,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Electronics Inventory")
+app = FastAPI(title="General Inventory")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 env = Environment(
@@ -71,6 +71,7 @@ def init_db():
             value_model TEXT NOT NULL,
             normalized_value TEXT NOT NULL,
             quantity INTEGER NOT NULL DEFAULT 1,
+            price REAL NOT NULL DEFAULT 0.0,
             location TEXT NOT NULL,
             tags TEXT DEFAULT '',
             notes TEXT DEFAULT '',
@@ -82,6 +83,9 @@ def init_db():
         )
         """
     )
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(items)").fetchall()}
+    if "price" not in cols:
+        conn.execute("ALTER TABLE items ADD COLUMN price REAL NOT NULL DEFAULT 0.0")
     conn.commit()
     conn.close()
 
@@ -344,6 +348,7 @@ def question_targets_known_type(question: str):
 
 def inventory_ai_stats(items):
     total_quantity = sum(int(item["quantity"] or 0) for item in items)
+    total_value = sum(int(item["quantity"] or 0) * float(item["price"] or 0) for item in items)
     by_type = Counter(item["item_type"] for item in items)
     low_stock = [item for item in items if int(item["quantity"] or 0) <= 2]
 
@@ -356,6 +361,7 @@ def inventory_ai_stats(items):
     return {
         "unique_items": len(items),
         "total_quantity": total_quantity,
+        "total_value": round(total_value, 2),
         "top_types": by_type.most_common(6),
         "low_stock": low_stock[:10],
         "duplicate_groups": duplicate_groups[:8],
@@ -407,10 +413,14 @@ def generate_ai_answer(question: str, items):
         if stats["duplicate_groups"]:
             answer_parts.append("Possible duplicate groups found:")
             for group in stats["duplicate_groups"][:5]:
-                names = "; ".join([f"#{g['id']} {g['value_model']} qty {g['quantity']}" for g in group])
+                names = "; ".join([f"#{g['id']} {g['value_model']} qty {g['quantity']} price ${float(g['price'] or 0):.2f}" for g in group])
                 answer_parts.append(f"- {group[0]['item_type']} {group[0]['normalized_value']}: {names}")
         else:
             answer_parts.append("No strong duplicate groups were found using category + type + normalized value.")
+
+    if any(word in q_lower for word in ["price", "cost", "value", "worth", "money", "budget"]):
+        mode = "value-diagnostic"
+        answer_parts.append(f"Estimated stored inventory value: ${stats['total_value']:.2f} based on unit price × quantity. Items without price are counted as $0.00.")
 
     if retrieved:
         if not answer_parts:
@@ -418,7 +428,7 @@ def generate_ai_answer(question: str, items):
         for r in retrieved[:5]:
             item = r["item"]
             answer_parts.append(
-                f"- #{item['id']} {item['value_model']} ({item['item_type']}) — qty {item['quantity']} — {item['location']} — relevance {r['score']}"
+                f"- #{item['id']} {item['value_model']} ({item['item_type']}) — qty {item['quantity']} — ${float(item['price'] or 0):.2f} each — {item['location']} — relevance {r['score']}"
             )
         if any(word in q_lower for word in ["project", "build", "kit", "arduino", "sensor", "motor", "coil", "garden"]):
             answer_parts.append("Project suggestion: open the top matching items, verify quantity, then print QR labels for the physical boxes before starting the build.")
@@ -511,10 +521,11 @@ async def home(request: Request, q: str = ""):
         "index.html",
         items=items,
         q=q,
-        category_options=["Electronics"],
+        category_options=["Electronics", "Tools", "Materials", "Office", "Household", "Books", "Documents", "Other"],
         type_options=[
             "Resistor", "Capacitor", "Inductor", "Diode", "Transistor", "IC",
-            "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply", "Tool", "Other"
+            "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply",
+            "Tool", "Material", "Hardware", "Office Supply", "Book", "Document", "Furniture", "Other"
         ],
     )
 
@@ -534,6 +545,7 @@ async def create_item(
     item_type: str = Form(...),
     value_model: str = Form(...),
     quantity: int = Form(...),
+    price: float = Form(0.0),
     location: str = Form(...),
     tags: str = Form(""),
     notes: str = Form(""),
@@ -559,14 +571,16 @@ async def create_item(
                 "item_type": item_type,
                 "value_model": value_model,
                 "quantity": quantity,
+                "price": price,
                 "location": location,
                 "tags": tags,
                 "notes": notes,
             },
-            category_options=["Electronics"],
+            category_options=["Electronics", "Tools", "Materials", "Office", "Household", "Books", "Documents", "Other"],
             type_options=[
                 "Resistor", "Capacitor", "Inductor", "Diode", "Transistor", "IC",
-                "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply", "Tool", "Other"
+                "Module", "Sensor", "Board", "Cable", "Connector", "Power Supply",
+                "Tool", "Material", "Hardware", "Office Supply", "Book", "Document", "Furniture", "Other"
             ],
         )
 
@@ -578,13 +592,13 @@ async def create_item(
         """
         INSERT INTO items (
             category, item_type, value_model, normalized_value,
-            quantity, location, tags, notes, structured_name, photo_filename
+            quantity, price, location, tags, notes, structured_name, photo_filename
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             category, item_type, value_model, normalized_value,
-            quantity, location, tags, notes, structured_name, photo_filename
+            quantity, price, location, tags, notes, structured_name, photo_filename
         ),
     )
     item_id = cur.lastrowid
@@ -654,6 +668,7 @@ async def edit_item(
     item_type: str = Form(...),
     value_model: str = Form(...),
     quantity: int = Form(...),
+    price: float = Form(0.0),
     location: str = Form(...),
     tags: str = Form(""),
     notes: str = Form(""),
@@ -675,13 +690,13 @@ async def edit_item(
         """
         UPDATE items
         SET category=?, item_type=?, value_model=?, normalized_value=?,
-            quantity=?, location=?, tags=?, notes=?, structured_name=?,
+            quantity=?, price=?, location=?, tags=?, notes=?, structured_name=?,
             photo_filename=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
         """,
         (
             category, item_type, value_model, normalized_value,
-            quantity, location, tags, notes, structured_name,
+            quantity, price, location, tags, notes, structured_name,
             photo_filename, item_id
         ),
     )

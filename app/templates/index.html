@@ -2,7 +2,7 @@
 {% block content %}
 <div class="grid2">
   <section class="card">
-    <h2>Add electronics item</h2>
+    <h2>Add inventory item</h2>
 
     {% if duplicate_warning %}
     <div class="alert warn">
@@ -19,7 +19,7 @@
     <form method="post" action="/items" enctype="multipart/form-data" class="form">
       <input type="hidden" name="confirm_duplicate" value="{% if duplicate_warning %}1{% else %}0{% endif %}">
       <label>Category
-        <input type="text" name="category" value="{{ pending_form.category if pending_form else 'Electronics' }}" required>
+        <input type="text" name="category" value="{{ pending_form.category if pending_form else 'General' }}" placeholder="Electronics / Tools / Office / Materials" required>
       </label>
       <label>Type
         <select name="item_type" required>
@@ -33,6 +33,9 @@
       </label>
       <label>Quantity
         <input type="number" name="quantity" min="0" value="{{ pending_form.quantity if pending_form else 1 }}" required>
+      </label>
+      <label>Unit price ($)
+        <input type="number" name="price" min="0" step="0.01" value="{{ pending_form.price if pending_form else 0 }}">
       </label>
       <label>Location
         <input type="text" name="location" value="{{ pending_form.location if pending_form else '' }}" placeholder="Box 1 / Drawer A2" required>
@@ -54,7 +57,7 @@
     <div class="row between">
       <h2>Search inventory</h2>
       <form method="get" action="/" class="inline-form search-form">
-        <input type="text" name="q" value="{{ q or '' }}" placeholder="10k, Arduino, Drawer A2">
+        <input type="text" name="q" value="{{ q or '' }}" placeholder="10k, Arduino, drill, paper, Drawer A2">
         <button type="submit">Search</button>
       </form>
     </div>
@@ -69,6 +72,7 @@
           <div class="muted">Value/Model: {{ item['value_model'] }}</div>
           <div class="muted">Location: {{ item['location'] }}</div>
           <div class="muted">Qty: {{ item['quantity'] }}</div>
+          <div class="muted">Price: ${{ '%.2f'|format(item['price'] or 0) }} each • Total: ${{ '%.2f'|format((item['price'] or 0) * (item['quantity'] or 0)) }}</div>
         </div>
         {% if item['photo_filename'] %}
         <img class="thumb" src="/media/{{ item['photo_filename'] }}" alt="">
