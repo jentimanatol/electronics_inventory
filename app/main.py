@@ -25,6 +25,11 @@ try:
 except Exception:
     build_ai_lab_summary = None
 
+try:
+    from app.ai_intent_model import classify_inventory_question
+except Exception:
+    classify_inventory_question = None
+
 
 
 
@@ -251,16 +256,35 @@ AI_SYNONYMS = {
 }
 
 
+def singularize_ai_token(word: str) -> str:
+    irregular = {
+        "categories": "category", "batteries": "battery", "supplies": "supply",
+        "boxes": "box", "switches": "switch", "wires": "wire", "tools": "tool",
+        "materials": "material", "documents": "document", "books": "book",
+        "sensors": "sensor", "resistors": "resistor", "capacitors": "capacitor",
+        "modules": "module", "connectors": "connector", "motors": "motor",
+        "drivers": "driver", "boards": "board", "items": "item", "types": "type",
+    }
+    if word in irregular:
+        return irregular[word]
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 4 and word.endswith("es") and not word.endswith(("ses", "xes")):
+        return word[:-2]
+    if len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us")):
+        return word[:-1]
+    return word
+
+
 def tokenize_ai(text: str):
     words = re.findall(r"[a-zA-Z0-9]+", (text or "").lower())
     tokens = []
     for w in words:
-        if len(w) <= 1 or w in AI_STOPWORDS:
-            continue
-        tokens.append(w)
-        # Tiny singular/plural normalization: capacitors -> capacitor, sensors -> sensor.
-        if len(w) > 3 and w.endswith("s"):
-            tokens.append(w[:-1])
+        base = singularize_ai_token(w)
+        for token in {w, base}:
+            if len(token) <= 1 or token in AI_STOPWORDS:
+                continue
+            tokens.append(token)
     expanded = list(tokens)
     for token in tokens:
         expanded.extend(AI_SYNONYMS.get(token, set()))
@@ -368,6 +392,58 @@ def inventory_ai_stats(items):
     }
 
 
+def ai_intent(question: str):
+    if classify_inventory_question:
+        try:
+            return classify_inventory_question(question)
+        except Exception:
+            pass
+    q = (question or "").lower()
+    if any(p in q for p in ["show all", "list all", "all items", "everything", "full inventory"]):
+        return {"intent": "show_all", "confidence": 0.8}
+    if any(p in q for p in ["category", "categories", "types", "group by"]):
+        return {"intent": "show_categories", "confidence": 0.8}
+    if any(p in q for p in ["restock", "low stock", "shortage", "qty", "quantity"]):
+        return {"intent": "low_stock", "confidence": 0.8}
+    if any(p in q for p in ["duplicate", "same", "repeated"]):
+        return {"intent": "duplicates", "confidence": 0.8}
+    if any(p in q for p in ["price", "cost", "value", "worth", "money"]):
+        return {"intent": "inventory_value", "confidence": 0.8}
+    return {"intent": "search", "confidence": 0.5}
+
+
+def format_ai_item_line(item, include_category: bool = True) -> str:
+    category = f"{item['category']} / " if include_category else ""
+    return (
+        f"- #{item['id']} {category}{item['value_model']} ({item['item_type']}) "
+        f"— qty {item['quantity']} — ${float(item['price'] or 0):.2f} each "
+        f"— total ${int(item['quantity'] or 0) * float(item['price'] or 0):.2f} — {item['location']}"
+    )
+
+
+def build_category_summary(items):
+    by_category = defaultdict(list)
+    by_type = defaultdict(list)
+    for item in items:
+        by_category[item["category"]].append(item)
+        by_type[item["item_type"]].append(item)
+
+    lines = ["Inventory categories and groups:"]
+    for category, group in sorted(by_category.items(), key=lambda kv: kv[0].lower()):
+        qty = sum(int(i["quantity"] or 0) for i in group)
+        value = sum(int(i["quantity"] or 0) * float(i["price"] or 0) for i in group)
+        type_counts = Counter(i["item_type"] for i in group).most_common(4)
+        type_text = ", ".join(f"{t} × {c}" for t, c in type_counts)
+        lines.append(f"- {category}: {len(group)} records, qty {qty}, value ${value:.2f}; top types: {type_text or 'none'}")
+
+    lines.append("")
+    lines.append("Top item types:")
+    for item_type, group in sorted(by_type.items(), key=lambda kv: (-len(kv[1]), kv[0].lower()))[:12]:
+        qty = sum(int(i["quantity"] or 0) for i in group)
+        lines.append(f"- {item_type}: {len(group)} records, qty {qty}")
+    return "\n".join(lines)
+
+
 def generate_ai_answer(question: str, items):
     question_clean = (question or "").strip()
     stats = inventory_ai_stats(items)
@@ -379,6 +455,8 @@ def generate_ai_answer(question: str, items):
     retrieved.extend([r for r in direct_matches if r["item"]["id"] not in seen_ids])
     retrieved = retrieved[:8]
     q_lower = question_clean.lower()
+    intent_info = ai_intent(question_clean)
+    intent_name = intent_info.get("intent", "search")
 
     if not items:
         return {
@@ -390,16 +468,38 @@ def generate_ai_answer(question: str, items):
 
     if not question_clean:
         return {
-            "answer": "Ask me something like: 'What Arduino parts do I have?', 'What should I restock?', 'Find sensors for a smart garden project', or 'Do I have duplicate capacitors?'.",
+            "answer": "Ask me something like: 'Show all items', 'Show categories', 'Do I have resistors?', 'What should I restock?', 'Find sensors for a smart garden project', or 'Do I have duplicate capacitors?'.",
             "retrieved": [],
             "stats": stats,
             "mode": "help",
         }
 
-    answer_parts = []
-    mode = "semantic-rag"
+    if intent_name == "show_all":
+        max_lines = 40
+        lines = [f"Showing {min(len(items), max_lines)} of {len(items)} inventory records:"]
+        for item in items[:max_lines]:
+            lines.append(format_ai_item_line(item))
+        if len(items) > max_lines:
+            lines.append(f"... {len(items) - max_lines} more items not shown. Use a category or type question to narrow the list.")
+        return {
+            "answer": "\n".join(lines),
+            "retrieved": [{"item": item, "score": 1.0} for item in items[:8]],
+            "stats": stats,
+            "mode": f"intent-show-all confidence={intent_info.get('confidence', 0):.2f}",
+        }
 
-    if any(word in q_lower for word in ["restock", "low", "shortage", "buy", "missing", "quantity", "qty"]):
+    if intent_name == "show_categories":
+        return {
+            "answer": build_category_summary(items),
+            "retrieved": [],
+            "stats": stats,
+            "mode": f"intent-show-categories confidence={intent_info.get('confidence', 0):.2f}",
+        }
+
+    answer_parts = []
+    mode = f"semantic-rag intent={intent_name} confidence={intent_info.get('confidence', 0):.2f}"
+
+    if intent_name == "low_stock" or any(word in q_lower for word in ["restock", "low", "shortage", "buy", "missing", "quantity", "qty"]):
         mode = "stock-diagnostic"
         if stats["low_stock"]:
             answer_parts.append("Main warning: these parts have low quantity and should be checked before the next build:")
@@ -408,7 +508,7 @@ def generate_ai_answer(question: str, items):
         else:
             answer_parts.append("I do not see low-stock items with quantity 2 or less.")
 
-    if any(word in q_lower for word in ["duplicate", "same", "repeated"]):
+    if intent_name == "duplicates" or any(word in q_lower for word in ["duplicate", "same", "repeated"]):
         mode = "duplicate-diagnostic"
         if stats["duplicate_groups"]:
             answer_parts.append("Possible duplicate groups found:")
@@ -418,7 +518,7 @@ def generate_ai_answer(question: str, items):
         else:
             answer_parts.append("No strong duplicate groups were found using category + type + normalized value.")
 
-    if any(word in q_lower for word in ["price", "cost", "value", "worth", "money", "budget"]):
+    if intent_name == "inventory_value" or any(word in q_lower for word in ["price", "cost", "value", "worth", "money", "budget"]):
         mode = "value-diagnostic"
         answer_parts.append(f"Estimated stored inventory value: ${stats['total_value']:.2f} based on unit price × quantity. Items without price are counted as $0.00.")
 
