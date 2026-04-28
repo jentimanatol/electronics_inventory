@@ -20,6 +20,11 @@ from fastapi import UploadFile, File
 import tempfile
 import shutil
 
+try:
+    from app.ai_decoder_lab import build_ai_lab_summary
+except Exception:
+    build_ai_lab_summary = None
+
 
 
 
@@ -518,7 +523,8 @@ async def home(request: Request, q: str = ""):
 async def ai_page(request: Request, q: str = ""):
     items = load_items()
     result = generate_ai_answer(q, items)
-    return render(request, "ai.html", q=q, result=result, items=items)
+    lab = build_ai_lab_summary(q, result, items) if build_ai_lab_summary else None
+    return render(request, "ai.html", q=q, result=result, items=items, lab=lab)
 
 
 @app.post("/items")
