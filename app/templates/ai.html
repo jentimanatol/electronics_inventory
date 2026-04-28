@@ -78,6 +78,64 @@
   </div>
 </section>
 
+
+{% if lab %}
+<section class="card ai-lab-card">
+  <div class="panel-kicker">Transformer decoding and deployment lab</div>
+  <h2>Class evidence: decoder strategies inspired by your lecture demos</h2>
+  <p class="muted">
+    This section does not invent inventory facts. It demonstrates how a decoder could produce text using the retrieved database rows as a tiny local corpus.
+  </p>
+
+  <div class="grid3 ai-lab-grid">
+    <div class="ai-lab-box">
+      <h3>Greedy decoding</h3>
+      <p class="muted small-note">Always chooses the highest-probability next token.</p>
+      <pre class="ai-mini-output">{{ lab.decoding.greedy }}</pre>
+    </div>
+    <div class="ai-lab-box">
+      <h3>Beam search</h3>
+      <p class="muted small-note">Keeps several candidate sequences and chooses the best path.</p>
+      <pre class="ai-mini-output">{{ lab.decoding.beam_search }}</pre>
+    </div>
+    <div class="ai-lab-box">
+      <h3>Temperature + top-k/top-p</h3>
+      <p class="muted small-note">Samples from a restricted probability set for controlled diversity.</p>
+      <pre class="ai-mini-output">{{ lab.decoding.temperature_topk_topp }}</pre>
+    </div>
+  </div>
+
+  <div class="grid2 ai-lab-grid">
+    <div class="ai-lab-box">
+      <h3>Serving / KV-cache idea</h3>
+      <p class="muted small-note">
+        Full recompute cost: {{ lab.deployment.kv_cache.full_recompute_units }} units<br>
+        KV-cache cost: {{ lab.deployment.kv_cache.kv_cache_units }} units<br>
+        Estimated speedup: {{ lab.deployment.kv_cache.estimated_speedup }}×
+      </p>
+      <p class="muted small-note">{{ lab.deployment.continuous_batching.idea }}</p>
+    </div>
+    <div class="ai-lab-box">
+      <h3>Quantization / cascade plan</h3>
+      <p class="muted small-note">
+        Tiny decoder estimate: FP32 {{ lab.deployment.quantization.fp32 }}, INT8 {{ lab.deployment.quantization.int8 }}, INT4 {{ lab.deployment.quantization.int4 }}.
+      </p>
+      <p class="muted small-note">
+        Route: <strong>{{ lab.deployment.cascade.route }}</strong><br>
+        {{ lab.deployment.cascade.reason }}
+      </p>
+    </div>
+  </div>
+
+  <h3>Evaluation hooks for the report</h3>
+  <ul class="ai-eval-list">
+    {% for hook in lab.evaluation_hooks %}
+    <li>{{ hook }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if result.retrieved %}
 <section class="card">
   <h2>Retrieved evidence</h2>
